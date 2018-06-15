@@ -10,10 +10,10 @@
 namespace caffe2 {
 
 /**
- * @brief A templated class to allow one to wrap a CPU operator as a CUDA
+ * @brief A templated class to allow one to wrap a CPU operator as a HIP
  * operator.
  *
- * This class can be used when one does not have the CUDA implementation ready
+ * This class can be used when one does not have the HIP implementation ready
  * yet for an operator. Essentially, what this op does is to automatically
  * deal with data copy for you. Plausibly, this causes a lot of overhead and
  * is not optimal, so you should use this operator mostly for quick prototyping
@@ -24,23 +24,23 @@ namespace caffe2 {
  * Example usage: if you have a class MyMagicOp that is CPU based, and you use
  * the registration code
  *     REGISTER_CPU_OPERATOR(MyMagic, MyMagicOp);
- * to register the CPU side, you can create its corresponding GPU operator
+ * to register the CPU side, you can create its corresponding HIP operator
  * (with performance hits of course) via
  *     REGISTER_HIP_OPERATOR(MyMagic,
- *                            GPUFallbackOp<MyMagicOp>);
+ *                            HIPFallbackOp<MyMagicOp>);
  *
  * Advanced usage: if you want to have some specific outputs never copied, you
  * can use the SkipOutputCopy template argument to do that. For example, if
  * MyMagic produces two outputs and the first output is always going to live on
  * the CPU, you can do
  *     REGISTER_HIP_OPERATOR(MyMagic,
- *                            GPUFallbackOp<MyMagicOp, SkipIndices<0>>);
+ *                            HIPFallbackOp<MyMagicOp, SkipIndices<0>>);
  */
 template <class CPUOp, typename SkipOutputCopy = SkipIndices<>>
-class GPUFallbackOp final : public Operator<HIPContext> {
+class HIPFallbackOp final : public Operator<HIPContext> {
  public:
   USE_OPERATOR_FUNCTIONS(HIPContext);
-  GPUFallbackOp(const OperatorDef& def, Workspace* ws)
+  HIPFallbackOp(const OperatorDef& def, Workspace* ws)
       : Operator<HIPContext>(def, ws) {
     CAFFE_ENFORCE_EQ(def.device_option().device_type(), HIP);
     OperatorDef base_def_(def);
@@ -83,7 +83,7 @@ class GPUFallbackOp final : public Operator<HIPContext> {
     }
 
     if (!base_op_->Run()) {
-      LOG(ERROR) << "Base op run failed in GPUFallbackOp. Def: "
+      LOG(ERROR) << "Base op run failed in HIPFallbackOp. Def: "
                  << ProtoDebugString(this->debug_def());
       return false;
     }
@@ -94,7 +94,7 @@ class GPUFallbackOp final : public Operator<HIPContext> {
       }
       CAFFE_ENFORCE(
           local_output_blobs_[i]->template IsType<TensorCPU>(),
-          "GPU fallback op currently does not support non-TensorCPU "
+          "HIP fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
       Output(i)->CopyFrom(
           local_output_blobs_[i]->template Get<TensorCPU>(), &context_);

@@ -29,7 +29,7 @@ OPERATOR_SCHEMA(IncrementByOne)
     .AllowInplace({{0, 0}});
 
 REGISTER_CPU_OPERATOR(IncrementByOne, IncrementByOneOp);
-REGISTER_HIP_OPERATOR(IncrementByOne, GPUFallbackOp<IncrementByOneOp>);
+REGISTER_HIP_OPERATOR(IncrementByOne, HIPFallbackOp<IncrementByOneOp>);
 
 TEST(OperatorFallbackTest, IncrementByOneOp) {
   OperatorDef op_def = CreateOperatorDef(
@@ -52,7 +52,7 @@ TEST(OperatorFallbackTest, IncrementByOneOp) {
   }
 }
 
-TEST(OperatorFallbackTest, GPUIncrementByOneOp) {
+TEST(OperatorFallbackTest, HIPIncrementByOneOp) {
   if (!HasHipGPU())
     return;
   OperatorDef op_def = CreateOperatorDef(

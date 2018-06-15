@@ -41,6 +41,7 @@ from __future__ import unicode_literals
 from caffe2.proto import caffe2_pb2
 from caffe2.python import (
     workspace, device_checker, gradient_checker, test_util, core)
+import collections
 import contextlib
 import copy
 import functools
@@ -50,6 +51,8 @@ import hypothesis.strategies as st
 import logging
 import numpy as np
 import os
+import re
+import unittest
 
 
 def is_sandcastle():
@@ -251,7 +254,8 @@ def tensors1d(n, min_len=1, max_len=64, dtype=np.float32, elements=None):
 
 cpu_do = caffe2_pb2.DeviceOption()
 gpu_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA)
-device_options = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else [])
+hip_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.HIP)
+device_options = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else []) + ([hip_do] if workspace.has_hip_support else [])
 # Include device option for each GPU
 expanded_device_options = [cpu_do] + (
     [caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA, cuda_gpu_id=i)
@@ -274,6 +278,29 @@ gcs = dict(
 
 gcs_cpu_only = dict(gc=st.sampled_from([cpu_do]), dc=st.just([cpu_do]))
 gcs_gpu_only = dict(gc=st.sampled_from([gpu_do]), dc=st.just([gpu_do]))
+
+
+def _hipify(func):
+    @functools.wraps(func)
+    def wrapped(self, device_option, op, *args, **kwargs):
+        if isinstance(device_option, collections.Iterable):
+            is_hip = hip_do in device_option
+        else:
+            is_hip = (hip_do == device_option)
+
+        if is_hip:
+            if op.engine.lower() == 'cudnn' or not op.engine:
+                op.engine = 'MIOPEN'
+
+        try:
+            return func(self, device_option, op, *args, **kwargs)
+        except RuntimeError as e:
+            if (is_hip and
+                re.search(r"Cannot create operator of type '\w+' on the device 'HIP'", str(e))):
+                raise unittest.SkipTest('Skipping')
+            else:
+                raise
+    return wrapped
 
 
 @contextlib.contextmanager
@@ -317,6 +344,7 @@ class HypothesisTestCase(test_util.TestCase):
     A unittest.TestCase subclass with some helper functions for
     utilizing the `hypothesis` (hypothesis.readthedocs.io) library.
     """
+    @_hipify
     def assertDeviceChecks(
         self,
         device_options,
@@ -350,6 +378,7 @@ class HypothesisTestCase(test_util.TestCase):
             dc.CheckSimple(op, inputs, outputs_to_check, input_device_options)
         )
 
+    @_hipify
     def assertGradientChecks(
         self,
         device_option,
@@ -486,6 +515,7 @@ class HypothesisTestCase(test_util.TestCase):
             if os.getenv('CAFFE2_ASSERT_SHAPEINFERENCE') == '1':
                 raise e
 
+    @_hipify
     def assertReferenceChecks(
         self,
         device_option,
@@ -590,6 +620,7 @@ class HypothesisTestCase(test_util.TestCase):
                         threshold=threshold)
             return outs
 
+    @_hipify
     def assertValidationChecks(
             self,
             device_option,
@@ -626,6 +657,7 @@ class HypothesisTestCase(test_util.TestCase):
             else:
                 validator(inputs=inputs, outputs=outputs)
 
+    @_hipify
     def assertRunOpRaises(
         self,
         device_option,

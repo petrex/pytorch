@@ -12,10 +12,10 @@
 namespace caffe2 {
 namespace python {
 
-REGISTER_HIP_OPERATOR(Python, GPUFallbackOp<PythonOp<CPUContext, false>>);
+REGISTER_HIP_OPERATOR(Python, HIPFallbackOp<PythonOp<CPUContext, false>>);
 REGISTER_HIP_OPERATOR(
     PythonGradient,
-    GPUFallbackOp<PythonGradientOp<CPUContext, false>>);
+    HIPFallbackOp<PythonGradientOp<CPUContext, false>>);
 
 REGISTER_HIP_OPERATOR(PythonDLPack, PythonOp<HIPContext, true>);
 REGISTER_HIP_OPERATOR(PythonDLPackGradient, PythonGradientOp<HIPContext, true>);
