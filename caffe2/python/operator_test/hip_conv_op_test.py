@@ -40,6 +40,7 @@ class HIPConvTest(hu.HypothesisTestCase):
         ).astype(np.float32) + 0.5
         b = np.random.rand(output_channels).astype(np.float32) + 0.5
 
+        print(b)
         inputs = [X, w, b]
         self.assertDeviceChecks(dc, op, inputs, [0])
 

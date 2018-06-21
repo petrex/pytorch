@@ -349,17 +349,21 @@ bool MIOPENConvOp::DoRunWithType() {
 
       CAFFE_ENFORCE_EQ(bias.ndim(), 1);
       CAFFE_ENFORCE_EQ(bias.dim32(0), M);
-      MIOPEN_ENFORCE(miopenConvolutionForwardBias(
+
+      MIOPEN_ENFORCE(miopenOpTensor(
           miopen_wrapper_.inline_miopen_handle(),
+          miopenTensorOpAdd,
+          &alpha_,
+          top_desc_,
+          Y->template data<T_Y>(),
           &alpha_,
           bias_desc_,
           bias.template data<T_B>(),
           &beta_,
-          top_desc_for_bias_,
+          top_desc_,
           Y->template mutable_data<T_Y>()));
+      hipDeviceSynchronize();
     }
-
-    hipDeviceSynchronize();
   } else {
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         weight_desc_,
@@ -442,17 +446,21 @@ bool MIOPENConvOp::DoRunWithType() {
 
       CAFFE_ENFORCE_EQ(bias.ndim(), 1);
       CAFFE_ENFORCE_EQ(bias.dim32(0), M);
-      MIOPEN_ENFORCE(miopenConvolutionForwardBias(
+
+      MIOPEN_ENFORCE(miopenOpTensor(
           miopen_wrapper_.inline_miopen_handle(),
+          miopenTensorOpAdd,
+          &alpha_,
+          top_desc_,
+          Y->template data<T_Y>(),
           &alpha_,
           bias_desc_,
           bias.template data<T_B>(),
           &beta_,
           top_desc_,
           Y->template mutable_data<T_Y>()));
+      hipDeviceSynchronize();
     }
-
-    hipDeviceSynchronize();
   }
 
   return true;
