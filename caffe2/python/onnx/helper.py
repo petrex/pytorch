@@ -59,16 +59,21 @@ def c2_native_run_net(init_net, predict_net, inputs, steps=None):
                 ws.FeedBlob(predict_net.external_input[i], inputs[i],
                             predict_net.device_option)
 
-    if steps:
-        steps_net = caffe2_pb2.NetDef()
-        steps_net.CopyFrom(predict_net)
-        del steps_net.op[steps:]
-        steps_net.external_output[:] = steps_net.op[steps-1].output
-        predict_net = steps_net
+    if steps is not None:
+        if steps > 0:
+            steps_net = caffe2_pb2.NetDef()
+            steps_net.CopyFrom(predict_net)
+            del steps_net.op[steps:]
+            steps_net.external_output[:] = steps_net.op[steps-1].output
+            predict_net = steps_net
+            ws.RunNetOnce(predict_net)
+            output_names = predict_net.external_output
+        else:
+            output_names = predict_net.external_input
+    else:
+        ws.RunNetOnce(predict_net)
+        output_names = predict_net.external_output
 
-    ws.RunNetOnce(predict_net)
-
-    output_names = predict_net.external_output
     output_values = [ws.FetchBlob(name) for name in output_names]
     return ws, namedtupledict('Outputs', output_names)(*output_values)
 
