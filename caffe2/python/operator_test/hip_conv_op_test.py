@@ -44,6 +44,31 @@ class HIPConvTest(hu.HypothesisTestCase):
         inputs = [X, w, b]
         self.assertDeviceChecks(dc, op, inputs, [0])
 
+    @given(**hu.gcs)
+    def test_simple_conv(self, gc, dc):
+        op = core.CreateOperator(
+            "Conv",
+            ["X", "w"],
+            ["Y"],
+            kernel=1,
+            pad=0,
+            stride=1,
+            engine='MIOPEN',
+        )
+
+        X = np.random.rand(
+            1, 512, 28, 28
+        ).astype(np.float32) + 0.5
+        w = np.random.rand(
+            256, 512, 1, 1
+        ).astype(np.float32) + 0.5
+
+        # X = np.load(open('test_data/x', 'rb'))
+        # w = np.load(open('test_data/w', 'rb'))
+
+        inputs = [X, w]
+        self.assertDeviceChecks(dc, op, inputs, [0])
+
 
 if __name__ == "__main__":
     import unittest

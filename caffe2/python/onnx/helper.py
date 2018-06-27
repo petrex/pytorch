@@ -64,6 +64,7 @@ def c2_native_run_net(init_net, predict_net, inputs, steps=None):
             steps_net = caffe2_pb2.NetDef()
             steps_net.CopyFrom(predict_net)
             del steps_net.op[steps:]
+            print(steps_net.op[steps-1].type)
             steps_net.external_output[:] = steps_net.op[steps-1].output
             predict_net = steps_net
             ws.RunNetOnce(predict_net)
