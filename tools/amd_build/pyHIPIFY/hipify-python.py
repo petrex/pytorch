@@ -31,6 +31,7 @@ import shutil
 import sys
 import os
 import yaml
+import ast
 
 from functools import reduce
 from enum import Enum
@@ -110,7 +111,7 @@ def inside_included_directories(dirpath, rootpath, include_dirs):
     return reduce(lambda result, included_directory: re.match(r'{0}\b'.format(os.path.join(rootpath, included_directory)), dirpath) or result, include_dirs, None)
 
 
-def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=None):
+def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=None, ignore_files=[], hipify_caffe2=False):
     """
     Recursively walk over directory and call preprocessor on selected files.
 
@@ -150,13 +151,15 @@ def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=
                 filepath = os.sep.join([dirpath, filename])
 
                 # Execute the preprocessor on the specified file.
-                preprocessor(filepath, stats)
 
-                # Update the progress
-                print(os.path.join(dirpath, filename))
-                update_progress_bar(total_files, current_file)
+                if filename not in ignore_files:
+                    preprocessor(filepath, stats, hipify_caffe2)
 
-                current_file += 1
+                    # Update the progress
+                    print(os.path.join(dirpath, filename))
+                    update_progress_bar(total_files, current_file)
+
+                    current_file += 1
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC)
 
@@ -293,6 +296,22 @@ def processKernelLaunches(string, stats):
 
     return output_string
 
+def processCaffe2KernelLaunches(output_source):
+    """ 
+    Replace CUDA style kernel launches with hip style 
+    kernel launches for caffe2 cuda kernels
+    """
+
+    # Handle the <<numBlocks, blockDim, sharedSize, stream>>> syntax:
+    output_source = re.sub(r"(\w+)\s*((?:<.*>)?)\s*<<<\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*>>>([\s*\\]*)\(", r"hipLaunchKernelGGL(\1\2, dim3(\3), dim3(\4), \5, \6, ", output_source)
+
+    # Handle the <<numBlocks, blockDim, sharedSize>>> syntax:
+    output_source = re.sub(r"(\w+)\s*(<.*>)?\s*<<<\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*>>>([\s*\\]*)\(", r"hipLaunchKernelGGL((\g<1>\g<2>), dim3(\g<3>), dim3(\g<4>), \g<5>, 0, ",output_source)
+    
+    # Handle the <<numBlocks, blockDim>>> syntax:
+    output_source = re.sub(r"(\w+)\s*(<.*>)?\s*<<<\s*(.+)\s*,\s*(.+)\s*>>>([\s\\]*)\(", r"hipLaunchKernelGGL((\g<1>\g<2>), dim3(\g<3>), dim3(\g<4>), 0, 0, ", output_source)
+    
+    return output_source
 
 def find_parenthesis_end(input_string, start):
     inside_parenthesis = False
@@ -469,8 +488,25 @@ def disable_function(input_string, function, replace_style):
         output_string = input_string.replace(function_body, stub)
     return output_string
 
+def get_hip_file_path(filepath):
+    """ Returns the new name of the hipified file """
+    dirpath, filename = os.path.split(filepath)
+    filename_without_ext, ext = os.path.splitext(filename)
+    if "gpu" in filename_without_ext:
+        hip_name = re.sub(r'gpu','hip',filename_without_ext)
+        if ext == ".h":
+            hip_name = hip_name + ext
+        else:
+            hip_name = hip_name + ".cc"
+    else:
+        if ext in [".cc", ".h"]:
+            return filepath
+        hip_name = filename_without_ext + "_hip.cc"
 
-def preprocessor(filepath, stats):
+    hip_file_path = os.path.join(dirpath,hip_name)
+    return hip_file_path
+
+def preprocessor(filepath, stats, hipify_caffe2):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     with openf(filepath, "r+") as fileobj:
         output_source = fileobj.read()
@@ -486,12 +522,19 @@ def preprocessor(filepath, stats):
                     # Check if supported
                     if constants.HIP_UNSUPPORTED in meta_data:
                         stats["unsupported_calls"].append((cuda_type, filepath))
-
+                
                 if cuda_type in output_source:
-                    output_source = re.sub(r'\b({0})\b'.format(cuda_type), lambda x: hip_type, output_source)
+                    if hipify_caffe2:
+                        if constants.API_RAND not in meta_data:
+                            output_source = re.sub(r'({0})'.format(cuda_type), lambda x: hip_type, output_source)
+                    else:
+                        output_source = re.sub(r'\b({0})\b'.format(cuda_type), lambda x: hip_type, output_source)
 
         # Perform Kernel Launch Replacements
-        output_source = processKernelLaunches(output_source, stats)
+        if hipify_caffe2:
+            output_source = processCaffe2KernelLaunches(output_source)
+        else:
+            output_source = processKernelLaunches(output_source, stats)
 
         # Disable asserts
         if not filepath.endswith("THCGeneral.h.in"):
@@ -506,6 +549,9 @@ def preprocessor(filepath, stats):
         # Flush to disk
         os.fsync(fileobj)
 
+    if hipify_caffe2:
+        hip_file_path = get_hip_file_path(filepath)
+        os.rename(filepath,hip_file_path)
 
 def file_specific_replacement(filepath, search_string, replace_string, strict=False):
     with openf(filepath, "r+") as f:
@@ -713,8 +759,7 @@ def extract_arguments(start, string):
     return arguments
 
 # Add static_cast to ensure that the type of kernel arguments matches that in the corresponding kernel definition
-
-def add_static_casts(directory, extensions, KernelTemplateParams):
+def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=False):
     """Added necessary static casts to kernel launches to match kernel argument type to corresponding kernel definition
        Eg.
        old_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state), 
@@ -725,6 +770,11 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
           static_cast<int64_t>(ra__->stride[0]), static_cast<int64_t>(num_batches)'
     """
     # Add static_casts<> to all kernel launches.
+    if hipify_caffe2:
+        # substitute CUDA with HIP in KernelTemplateParams to align with hipified names
+        KernelTemplateParams = re.sub(r'CUDA', r'HIP', str(KernelTemplateParams))
+        KernelTemplateParams = ast.literal_eval(KernelTemplateParams)
+        
     for (dirpath, _dirnames, filenames) in os.walk(directory):
         for filename in filenames:
             if filename_ends_with_extension(filename, extensions):
@@ -765,8 +815,9 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                             # Add template type
                             if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                                 kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
-                            new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
-                                                       lambda x: kernel_name_with_template, new_kernel_launch)
+                            if not hipify_caffe2:
+                                new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
+                                                           lambda x: kernel_name_with_template, new_kernel_launch)
 
                             # Replace Launch
                             new_output_source = new_output_source.replace(old_kernel_launch, new_kernel_launch)
@@ -780,6 +831,24 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                     # Flush to disk
                     os.fsync(fileobj)
 
+def copy_files_to_hip_dirs(output_directory, project_directory, include_dirs):
+    """
+    Copies hipified files to hip directory under corresponding
+    include directories in project directory
+    """
+    for dirpath, _dir, filenames in os.walk(output_directory):
+        if inside_included_directories(dirpath, output_directory, include_dirs) and os.path.basename(dirpath) != "hip":
+            for file in filenames: 
+                rel_path = os.path.relpath(dirpath,output_directory)
+                dest_dir = os.path.join(project_directory,rel_path,"hip")
+                if not os.path.exists(dest_dir):
+                    os.makedirs(dest_dir)
+                if file.endswith("hip.cc") or file.endswith("hip.h"):
+                    dest_filepath = os.path.join(dest_dir,file)
+                    if not os.path.exists(dest_filepath):
+                        shutil.copyfile(os.path.join(dirpath,file),dest_filepath)
+
+    shutil.rmtree(output_directory)
 
 def main():
     """Example invocation
@@ -839,6 +908,20 @@ def main():
         help="Whether to automatically add static_casts to kernel arguments.",
         required=False)
 
+    parser.add_argument(
+        '--hipify_caffe2',
+        type=bool,
+        default=False,
+        help="Whether to hipify caffe2 source",
+        required=False)
+
+    parser.add_argument(
+        '--ignore_files',
+        nargs='+',
+        default=[],
+        help="list of file names to ignore for hipifying",
+        required=False)
+
     args = parser.parse_args()
 
     # Verify the project directory exists.
@@ -852,7 +935,7 @@ def main():
         args.output_directory = args.project_directory + "_amd"
 
     # Make sure output directory does not exist.
-    if not os.path.exists(args.output_directory):
+    if os.path.exists(args.output_directory):
         print("The output folder already exists.")
         sys.exit(2)
 
@@ -964,11 +1047,16 @@ def main():
         args.output_directory,
         extensions=args.extensions,
         show_detailed=args.show_detailed,
-        include_dirs=args.include_dirs)
+        include_dirs=args.include_dirs,
+        ignore_files=args.ignore_files,
+        hipify_caffe2=args.hipify_caffe2)
 
     if args.add_static_casts:
         # Execute the Clang Tool to Automatically add static casts
-        add_static_casts(args.output_directory, args.extensions, KernelTemplateParams)
+        add_static_casts(args.output_directory, args.extensions, KernelTemplateParams, hipify_caffe2=args.hipify_caffe2)
+
+    if args.hipify_caffe2:
+        copy_files_to_hip_dirs(args.output_directory, args.project_directory, args.include_dirs)
 
 
 if __name__ == '__main__':
