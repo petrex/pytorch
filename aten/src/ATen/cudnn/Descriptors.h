@@ -1,6 +1,7 @@
 #pragma once
 
-#include "Exceptions.h"
+#include "ATen/cuda/CUDAContext.h"
+#include "ATen/cuda/Exceptions.h"
 
 #include "cudnn-wrapper.h"
 #include <ATen/ATen.h>
@@ -249,14 +250,14 @@ struct AT_CUDA_API DropoutDescriptor
 
   // Initialize a dropout descriptor's RNG state.
   // WARNING: This function is very expensive, avoid calling this function!
-  // NB: it takes a Type so that we can generate a Variable if necessary
-  void initialize_rng(const at::Type& ty, cudnnHandle_t handle, float dropout, long long int seed) {
+  // NB: it takes a Type so that we can generate a Variable if necessary.
+  void initialize_rng(const Type& type, cudnnHandle_t handle, float dropout, long long int seed) {
     AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     size_t state_size;
     AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
-    AT_ASSERT(ty.is_cuda());
-    AT_ASSERT(ty.scalarType() == kByte);
-    state = ty.tensor({static_cast<int64_t>(state_size)});
+    AT_ASSERT(type.is_cuda());
+    AT_ASSERT(type.scalarType() == kByte);
+    state = at::empty({static_cast<int64_t>(state_size)}, type);
     AT_CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.data_ptr(), state_size, seed));
   }
 
@@ -304,7 +305,7 @@ struct AT_CUDA_API RNNDescriptor
           CUDNN_RNN_ALGO_STANDARD,
           datatype));
 #if CUDNN_VERSION >= 7000 && CUDA_VERSION >= 9000
-    cudaDeviceProp* prop = globalContext().getCurrentDeviceProperties();
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7) {
       if (datatype == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);

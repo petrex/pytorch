@@ -4,9 +4,10 @@
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/Layout.h"
 #include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/pybind_utils.h"
+#include "torch/csrc/jit/constants.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
@@ -38,10 +39,8 @@ static std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
 
-static std::shared_ptr<SugaredValue> createConstant(SourceRange loc, Method& m, const at::Tensor& val) {
-  auto n = m.graph()->createConstant(val);
-  n->setSourceLocation(std::make_shared<SourceRange>(loc));
-  return std::make_shared<SimpleValue>(m.graph()->insertNode(n)->output());
+inline std::shared_ptr<SugaredValue> toSimple(Value* v) {
+  return std::make_shared<SimpleValue>(v);
 }
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
@@ -67,7 +66,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     for (size_t i = 0; i < arg_types.size(); ++i) {
       if (!inputs[i]->type()->isSubtypeOf(*arg_types[i]))
         throw ErrorReport(loc) << "type mismatch at argument " << i << ": expected "
-                               << arg_types[i]->name() << ", but got " << inputs[i]->type()->name();
+                               << arg_types[i]->str() << ", but got " << inputs[i]->type()->str();
     }
     // We have to do this check here, because implementation of this function is tightly
     // coupled with the impl for PythonOp in the interpreter. Right now it assumes that
@@ -187,24 +186,25 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     // f = python_constant
     // while ...
     //   f = f + 1
+    auto& g = *m.graph();
     if(py::isinstance<py::int_>(self)) {
-      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(py::cast<int64_t>(self)));
+      return toSimple(insertConstant(g, py::cast<int64_t>(self), loc));
     } else if(py::isinstance<py::float_>(self)) {
-      return createConstant(loc, m, at::CPU(at::kFloat).scalarTensor(py::cast<float>(self)));
+      return toSimple(insertConstant(g, py::cast<float>(self), loc));
     } else if(py::isinstance<py::bool_>(self)) {
-      return createConstant(loc, m, at::CPU(at::kByte).scalarTensor(py::cast<bool>(self)));
+      return toSimple(insertConstant(g, py::cast<bool>(self), loc));
     } else if(THPDevice_Check(self.ptr())) {
       auto device = (THPDevice*) self.ptr();
-      auto t = as_tensor({static_cast<int64_t>(device->device.type()), device->device.index()});
-      return createConstant(loc, m, t);
+      std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()), device->device.index()};
+      return toSimple(insertConstant(g, std::move(v)));
     } else if(THPLayout_Check(self.ptr())) {
       auto layout = (THPLayout*) self.ptr();
       const auto v = static_cast<int64_t>(layout->layout);
-      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v));
+      return toSimple(insertConstant(g, v, loc));
     } else if(THPDtype_Check(self.ptr())) {
       auto dtype = (THPDtype*)(self.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v));
+      return toSimple(insertConstant(g, v, loc));
     }
     return std::make_shared<ConstantPythonValue>(self);
   }
@@ -370,22 +370,22 @@ void initJitScriptBindings(PyObject* module) {
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
-          [](Module& m,
+          [](std::shared_ptr<Module> m,
              const std::string& script,
              ResolutionCallback rcb, bool has_self) {
-            auto self = has_self ? std::make_shared<ModuleValue>(m.shared_from_this()) : nullptr;
-            return defineMethodsInModule(m, script, pythonResolver(rcb), self);
+            auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
+            return defineMethodsInModule(*m, script, pythonResolver(rcb), self);
           })
-      .def("_create_methods", [](Module& m, const std::vector<Def>& defs, const std::vector<ResolutionCallback>& rcbs) {
+      .def("_create_methods", [](std::shared_ptr<Module> m, const std::vector<Def>& defs, const std::vector<ResolutionCallback>& rcbs) {
         std::vector<Resolver> resolvers;
         for(auto & callback : rcbs) {
           resolvers.push_back(pythonResolver(callback));
         }
         defineMethodsInModule(
-          m,
+          *m,
           defs,
           resolvers,
-          std::make_shared<ModuleValue>(m.shared_from_this()));
+          std::make_shared<ModuleValue>(m));
       })
       .def("_get_method",
       [](Module& self, const std::string& name) -> const Method& {

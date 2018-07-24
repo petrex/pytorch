@@ -9,13 +9,14 @@
 #include <test/cpp/api/util.h>
 
 using namespace torch::nn;
+using namespace torch::test;
 
 template <typename R, typename Func>
 bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   torch::manual_seed(0);
 
   auto nhid = 32;
-  auto model = std::make_shared<torch::SimpleContainer>();
+  auto model = std::make_shared<SimpleContainer>();
   auto l1 = model->add(Linear(1, nhid), "l1");
   auto rnn = model->add(model_maker(nhid), "rnn");
   auto lo = model->add(Linear(nhid, 1), "lo");
@@ -32,7 +33,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   };
 
   if (cuda) {
-    model->cuda();
+    model->to(torch::kCUDA);
   }
 
   float running_loss = 1;
@@ -190,7 +191,7 @@ TEST_CASE("rnn_cuda", "[cuda]") {
   SECTION("sizes") {
     torch::manual_seed(0);
     LSTM model(LSTMOptions(128, 64).layers(3).dropout(0.2));
-    model->cuda();
+    model->to(torch::kCUDA);
     auto x = torch::randn(
         {10, 16, 128}, torch::requires_grad().device(torch::kCUDA));
     auto output = model->forward(x);

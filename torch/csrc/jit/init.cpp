@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/argument_spec.h"
+#include "torch/csrc/jit/passes/remove_expands.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
@@ -18,13 +19,13 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/decompose_addmm.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
+#include "torch/csrc/jit/passes/to_batch.h"
+#include "torch/csrc/jit/passes/specialize_undef.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
 #include "torch/csrc/jit/batched/BatchTensor.h"
-#include "torch/csrc/jit/python_interpreter.h"
 #include "torch/csrc/jit/pybind_utils.h"
-
 
 namespace torch  { namespace jit {
 
@@ -68,6 +69,7 @@ void initJITBindings(PyObject *module) {
      auto tensor_inputs = createVariableTensorList(inputs);
      PropagateInputShapes(graph, ArgumentSpec(with_grad, tensor_inputs));
    })
+   .def("_jit_pass_remove_expands", RemoveExpands)
    .def("_jit_pass_erase_number_types", EraseNumberTypes)
    .def("_jit_pass_loop_unrolling", UnrollLoops)
    .def("_jit_run_cpp_tests", [] {
@@ -87,6 +89,7 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_onnx_block", BlockToONNX)
    .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
    .def("_jit_pass_decompose_addmm", DecomposeAddmm)
+    .def("_jit_pass_specialize_undef", specializeUndef)
    .def("_jit_differentiate", [](Graph &g, const std::vector<bool>& requires_grad) {
        // the python binding slightly differs in semantics
        // it makes a copy of the input Graph, and works on that
@@ -123,6 +126,9 @@ void initJITBindings(PyObject *module) {
     })
     .def_property_readonly("df", [](Gradient& m) {
       return m.df;
+    })
+    .def_property_readonly("f_real_outputs", [](Gradient& m) {
+      return m.f_real_outputs;
     })
     .def_property_readonly("df_input_vjps", [](Gradient& m) {
       return m.df_input_vjps;
@@ -202,7 +208,7 @@ void initJITBindings(PyObject *module) {
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
   initBatchTensorBindings(module);
-  registerPythonInterpreterOps();
+  initRegisterBatchOpsBindings(module);
 }
 
 }}

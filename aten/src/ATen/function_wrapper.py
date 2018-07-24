@@ -143,7 +143,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 """)
 # add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
-${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
+AT_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
 
 # special method definition for factory functions in Functions.h
@@ -232,6 +232,11 @@ DYNAMIC_TYPE = {
     'accreal': 'accreal',
     'real': 'real',
     'long': 'int64_t',
+}
+
+NATIVE_DYNAMIC_TYPE = {
+    'Tensor &': 'Tensor',
+    'const Tensor &': 'Tensor',
 }
 
 TYPE_RETURN = {
@@ -544,7 +549,13 @@ def create_generic(top_env, declarations):
         for pattern, replacement in HEADER_CONSTANT_REPLACEMENTS:
             default = re.sub(pattern, replacement, str(default))
         if type_str in {'Scalar', 'int64_t', 'double'}:
-            return float(default) if '.' in default else int(default)
+            try:
+                return int(default)
+            except Exception:
+                try:
+                    return float(default)
+                except Exception:
+                    return default
         elif type_str == 'bool':
             assert default.lower() in ['true', 'false']
             return default.lower() == 'true'
@@ -865,13 +876,13 @@ def create_generic(top_env, declarations):
 
         # not clear we need dynamic_type translation as we can specify the correct type
         # directly in native functions
-        def add_type_as_dynamic_type(argument, option):
+        def add_dynamic_type(argument, option):
             # type: (AtFormal, FunctionOption) -> AtFormal
-            argument['dynamic_type'] = argument['type']
+            argument['dynamic_type'] = NATIVE_DYNAMIC_TYPE.get(argument['type'], argument['type'])
             return argument
 
         result = pos_args + kwd_args
-        result = [add_type_as_dynamic_type(argument, option) for argument in result]
+        result = [add_dynamic_type(argument, option) for argument in result]
 
         # ensure we get reference-type formals when appropriate
         def native_translate_formals(argument, option):
@@ -922,7 +933,7 @@ def create_generic(top_env, declarations):
 
             rtype = {
                 'type': actual_return_type,
-                'dynamic_type': t,
+                'dynamic_type': NATIVE_DYNAMIC_TYPE.get(t, t),
             }  # type: ReturnType
             if name is not None:
                 rtype['name'] = name

@@ -62,6 +62,7 @@ else:
 IsNUMAEnabled = C.is_numa_enabled
 GetNumNUMANodes = C.get_num_numa_nodes
 GetBlobNUMANode = C.get_blob_numa_node
+GetBlobSizeBytes = C.get_blob_size_bytes
 
 def _GetFreeFlaskPort():
     """Get a free flask port."""
@@ -225,6 +226,14 @@ def RunPlan(plan_or_step):
     if isinstance(plan_or_step, core.ExecutionStep):
         plan_or_step = core.Plan(plan_or_step)
     return C.run_plan(StringifyProto(plan_or_step))
+
+
+def RunPlanInBackground(plan_or_step):
+    # TODO(jiayq): refactor core.py/workspace.py to avoid circular deps
+    import caffe2.python.core as core
+    if isinstance(plan_or_step, core.ExecutionStep):
+        plan_or_step = core.Plan(plan_or_step)
+    return C.run_plan_in_background(StringifyProto(plan_or_step))
 
 
 def InferShapesAndTypes(nets, blob_dimensions=None, nets_proto=False):

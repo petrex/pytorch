@@ -8,11 +8,10 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THTensor *input,
           THIndexTensor *target,
           THTensor *output,
-          bool sizeAverage,
+          int64_t reduction,
           int p,
           THTensor *weights,
-          accreal margin_,
-          bool reduce)
+          accreal margin_)
 {
   real margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
   real *input_data, *weights_data;
@@ -27,13 +26,13 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   if (input->dim() == 1)
   {
     nframe = 1;
-    dim = input->size[0];
+    dim = input->size(0);
   }
   else
   {
-    nframe = input->size[0];
-    dim = input->size[1];
-    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size[0] == nframe),
+    nframe = input->size(0);
+    dim = input->size(1);
+    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size(0) == nframe),
              "inconsistent target size, got: ", target->sizes());
   }
 
@@ -51,7 +50,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   target_data = THIndexTensor_(data)(target);
   weights_data = weights ? THTensor_(data)(weights) : NULL;
 
-  if (!reduce)
+  if (reduction == Reduction::None)
   {
     THTensor_(resize1d)(output, nframe);
 
@@ -105,7 +104,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     }
 
     sum /= dim;
-    if(sizeAverage)
+    if(reduction == Reduction::ElementwiseMean)
       sum /= nframe;
 
     THTensor_(set1d)(output, 0, sum);
@@ -123,11 +122,10 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
           THIndexTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
-          bool sizeAverage,
+          int64_t reduction,
           int p,
           THTensor *weights,
-          accreal margin_,
-          bool reduce)
+          accreal margin_)
 {
   real margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
   real *input_data;
@@ -144,17 +142,17 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   if (input->dim() == 1)
   {
     nframe = 1;
-    dim = input->size[0];
+    dim = input->size(0);
   }
   else
   {
-    nframe = input->size[0];
-    dim = input->size[1];
-    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size[0] == nframe),
+    nframe = input->size(0);
+    dim = input->size(1);
+    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size(0) == nframe),
              "inconsistent target size, got: ", target->sizes());
   }
 
-  g = (sizeAverage && reduce ? 1./((real)(nframe*dim)) : 1./((real)dim));
+  g = (reduction == Reduction::ElementwiseMean ? 1./((real)(nframe*dim)) : 1./((real)dim));
 
   input = THTensor_(newContiguous)(input);
   target = THIndexTensor_(newContiguous)(target);
@@ -197,7 +195,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   }
   gradInput_data = THTensor_(data)(gradInput);
 
-  if (reduce)
+  if (reduction != Reduction::None)
   {
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
     for (t = 0; t < nframe * dim; t++) {

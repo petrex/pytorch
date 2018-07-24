@@ -7,6 +7,7 @@
 #include "ATen/Utils.h"
 #include "ATen/Error.h"
 #include "ATen/detail/CUDAHooksInterface.h"
+#include "ATen/CUDAStream.h"
 
 #include <memory>
 #include <mutex>
@@ -78,23 +79,6 @@ public:
     return thc_state.get();
   }
 
-  cudaStream_t getCurrentCUDAStream() const {
-    return detail::getCUDAHooks().getCurrentCUDAStream(thc_state.get());
-  }
-  cudaStream_t getCurrentCUDAStreamOnDevice(int64_t device) const {
-    return detail::getCUDAHooks().getCurrentCUDAStreamOnDevice(thc_state.get(), device);
-  }
-#ifndef __HIP_PLATFORM_HCC__
-  cusparseHandle_t getCurrentCUDASparseHandle() const {
-    return detail::getCUDAHooks().getCurrentCUDASparseHandle(thc_state.get());
-  }
-#endif
-  cudaDeviceProp* getCurrentDeviceProperties() const {
-    return detail::getCUDAHooks().getCurrentDeviceProperties(thc_state.get());
-  }
-  cudaDeviceProp* getDeviceProperties(int device) const {
-    return detail::getCUDAHooks().getDeviceProperties(thc_state.get(), device);
-  }
   int getNumGPUs() const {
     return detail::getCUDAHooks().getNumGPUs();
   }

@@ -186,15 +186,23 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
   // Find the length of the longest sequence.
   dev_max_length_.Resize(1);
   host_max_length_.Resize(1);
-  const T max_length = num_seq > 0 ? array_max<T>(
-                                         lengths_ptr,
-                                         num_seq,
-                                         dev_buffer_,
-                                         dev_max_length_,
-                                         host_max_length_,
-                                         context_)
-                                   : 0;
 
+  T temp = num_seq > 0 ? array_max<T>(
+                             lengths_ptr,
+                             num_seq,
+                             dev_buffer_,
+                             dev_max_length_,
+                             host_max_length_,
+                             context_)
+                       : 0;
+  if (max_length_ != -1) {
+    CAFFE_ENFORCE_GE(
+        max_length_,
+        temp,
+        "Pre-defined max_length should be greater than the real max_length");
+    temp = max_length_;
+  }
+  const T& max_length = temp;
   // Compute prefix sum over the lengths
   array_prefix_sum_exclusive<T>(
       lengths_ptr, num_seq, dev_buffer_, dev_lengths_prefix_sum_, context_);
@@ -248,7 +256,12 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
 
   CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
   CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
-
+  if (max_length_ != -1) {
+    CAFFE_ENFORCE_EQ(
+        max_length_,
+        data.dim(1),
+        "max_length should be equal to the packed segments");
+  }
   // Compute prefix sum over the lengths
   array_prefix_sum_exclusive<T>(
       lengths_ptr, num_seq, dev_buffer_, dev_lengths_prefix_sum_, context_);

@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <ATen/Error.h>
+#include <ATen/optional.h>
 
 #include <algorithm>
 #include <map>
@@ -34,12 +35,11 @@ const std::string& Module::name() const noexcept {
   return *name_;
 }
 
-std::shared_ptr<Module> Module::clone() const {
+std::shared_ptr<Module> Module::clone(at::optional<Device> device) const {
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
-      ". Use the copy constructor if you don't require polymorphic cloning. "
-      "Otherwise, subclass torch::nn::Cloneable<",
+      ". Subclass torch::nn::Cloneable<",
       name(),
       "> instead of torch::nn::Module to inherit the ability to clone.");
 }
@@ -90,14 +90,6 @@ void Module::eval() {
   is_training_ = false;
 }
 
-void Module::cpu() {
-  to_impl(torch::Device(torch::Device::Type::CPU));
-}
-
-void Module::cuda(int32_t device_index, bool non_blocking) {
-  to_impl(torch::Device(torch::Device::Type::CUDA, device_index), non_blocking);
-}
-
 void Module::to(torch::Device device, torch::Dtype dtype, bool non_blocking) {
   to_impl(device, dtype, non_blocking);
 }
@@ -139,6 +131,6 @@ Tensor& Module::register_buffer(std::string name, Tensor tensor) {
   return buffers_.insert(std::move(name), std::move(tensor));
 }
 
-void Module::clone_(Module& other) {}
+void Module::clone_(Module& other, at::optional<Device> device) {}
 } // namespace nn
 } // namespace torch
