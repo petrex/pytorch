@@ -36,7 +36,7 @@ def c2_native_run_op(op_def, inputs):
     return ws, namedtupledict('Outputs', output_names)(*output_values)
 
 
-def c2_native_run_net(init_net, predict_net, inputs):
+def c2_native_run_net(init_net, predict_net, inputs, steps=None):
     ws = Workspace()
     if init_net:
         ws.RunNetOnce(init_net)
@@ -58,6 +58,13 @@ def c2_native_run_net(init_net, predict_net, inputs):
             for i in range(len(inputs)):
                 ws.FeedBlob(predict_net.external_input[i], inputs[i],
                             predict_net.device_option)
+
+    if steps:
+        steps_net = caffe2_pb2.NetDef()
+        steps_net.CopyFrom(predict_net)
+        del steps_net.op[steps:]
+        steps_net.external_output[:] = steps_net.op[steps-1].output
+        predict_net = steps_net
 
     ws.RunNetOnce(predict_net)
 
