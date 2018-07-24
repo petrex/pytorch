@@ -25,7 +25,7 @@ def assert_close(o1, o2):
         raise ValueError(
             'Different number of outputs: {} vs. {}'.format(len(o1), len(o2)))
 
-    for v1, v2 in zip(o1, o2):
+    for v1, v2 in enumerate(zip(o1, o2)):
         if not v1.shape == v2.shape:
             raise ValueError(
                 'Different shape: {} vs. {}'.format(v1.shape, v2.shape))
@@ -36,10 +36,10 @@ def main():
     args = parse_args()
 
     init = caffe2_pb2.NetDef()
-    with open('resnet50/init_net.pb', 'rb') as f:
+    with open('/tmp/resnet50/init_net.pb', 'rb') as f:
         init.ParseFromString(f.read())
     predict = caffe2_pb2.NetDef()
-    with open('resnet50/predict_net.pb', 'rb') as f:
+    with open('/tmp/resnet50/predict_net.pb', 'rb') as f:
         predict.ParseFromString(f.read())
 
     outputs = {}
@@ -52,7 +52,7 @@ def main():
         for op in predict.op:
             op.device_option.CopyFrom(dc)
         predict.device_option.CopyFrom(dc)
-        _, results = c2_native_run_net(init, predict, [np.random.randn(1, 3, 224, 224).astype(dtype=np.float32)], steps=1)
+        _, results = c2_native_run_net(init, predict, [np.random.randn(1, 3, 224, 224).astype(dtype=np.float32)], steps=0)
         outputs[dc_s] = results
 
     assert_close(outputs['CPU'], outputs['HIP'])
