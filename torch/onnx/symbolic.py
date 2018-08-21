@@ -266,6 +266,30 @@ def tanh(g, self):
     return g.op("Tanh", self)
 
 
+def sin(g, self):
+    return g.op("Sin", self)
+
+
+def cos(g, self):
+    return g.op("Cos", self)
+
+
+def tan(g, self):
+    return g.op("Tan", self)
+
+
+def asin(g, self):
+    return g.op("Asin", self)
+
+
+def acos(g, self):
+    return g.op("Acos", self)
+
+
+def atan(g, self):
+    return g.op("Atan", self)
+
+
 def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
@@ -710,6 +734,12 @@ def type_as(g, self, other):
         return g.op("ATen", self, other, operator_s="type_as")
 
 
+@parse_args('v', 'is', 'v', 'v', 'f', 'i')
+def layer_norm(g, self, normalized_shape, weight, bias, eps, cudnn_enable):
+    return g.op("ATen", self, weight, bias, normalized_shape_i=normalized_shape,
+                eps_f=eps, cudnn_enable_i=cudnn_enable, operator_s="layer_norm")
+
+
 # ignore clone operators that are inserted by PyTorch autograd
 def clone(g, input):
     return input
@@ -717,6 +747,10 @@ def clone(g, input):
 
 def abs(g, self):
     return g.op("Abs", self)
+
+
+def log(g, self):
+    return g.op("Log", self)
 
 
 def pow(g, self, exponent):
@@ -1060,6 +1094,7 @@ def rnn_trace_override_symbolic(cell_type, func, sym, g, input, weights, hiddens
     inputs = list(itertools.chain.from_iterable(
         [[input], flattened_weights, hiddens,
             [batch_sizes] if batch_sizes else []]))
+
     outputs = g.wrapPyFuncWithSymbolic(
         forward_flattened_wrapper,
         inputs,
