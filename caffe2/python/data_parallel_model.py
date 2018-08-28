@@ -21,6 +21,7 @@ import warnings
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/nccl:nccl_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_gpu")
+dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_hip")
 
 log = logging.getLogger("data_parallel_model")
 log.setLevel(logging.INFO)
@@ -1035,6 +1036,9 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         model.NCCLAllreduce(
             blobs_group, blobs_group, control_input=control_input
         )
+        return
+    elif model._device_type == caffe2_pb2.HIP and use_rccl:
+        # TODO: rccl
         return
 
     if model._device_type == workspace.GpuDeviceType:
