@@ -230,6 +230,9 @@ class JitTestCase(TestCase):
             os.unlink(f.name)
         return imported
 
+    def assertGraphContains(self, graph, kind):
+        self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
+
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
         torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
         self.assertExpectedGraph(trace, *args, **kwargs)
@@ -351,8 +354,6 @@ class JitTestCase(TestCase):
 
         return ge
 
-
-class TestJit(JitTestCase):
     def assertExportImport(self, trace, inputs):
         graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
         m = torch.jit.ScriptModule()
@@ -360,6 +361,9 @@ class TestJit(JitTestCase):
         m_import = self.getExportImportCopy(m)
 
         self.assertEqual(m.forward(*inputs), m_import.forward(*inputs))
+
+
+class TestJit(JitTestCase):
 
     def test_simple(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -455,6 +459,52 @@ class TestJit(JitTestCase):
             self.assertTrue(inspect.ismethod(MyModule.method) or inspect.isfunction(MyModule.method))
         finally:
             torch.jit._enabled = True
+
+    def test_train_eval(self):
+        class Sub(nn.Module):
+            def forward(self, input):
+                if self.training:
+                    return input
+                else:
+                    return -input
+
+        class MyModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.sub = Sub()
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.sub(input) + 1
+
+        m = MyModule()
+        input = torch.rand(3, 4)
+        self.assertEqual(input + 1, m(input))
+        m.eval()
+        self.assertEqual(-input + 1, m(input))
+
+    def test_train_eval_const(self):
+        class MyModule(torch.jit.ScriptModule):
+            __constants__ = ['training']
+
+            def __init__(self):
+                super(MyModule, self).__init__()
+                # TODO: it is illegal to try to call
+                # eval/train because training has already
+                # been set. Consider allowing
+                # constants to be mutable until the end of __init__
+
+            @torch.jit.script_method
+            def forward(self, input):
+                if self.training:
+                    x = 2 * input
+                else:
+                    x = -input
+                return x + 1
+
+        m = MyModule()
+        input = torch.rand(3, 4)
+        self.assertEqual(2 * input + 1, m(input))
 
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
@@ -597,7 +647,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_lstm_fusion_concat(self):
+    def test_lstm_fusion_concat_cuda(self):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellC, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs))
@@ -605,7 +655,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_concat_fusion(self):
+    def test_concat_fusion_cuda(self):
         hx = torch.randn(3, 20, dtype=torch.float, device='cuda')
         cx = torch.randn(3, 20, dtype=torch.float, device='cuda')
 
@@ -636,7 +686,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_fusion_distribute(self):
+    def test_fusion_distribute_cuda(self):
         def f(x, y):
             z1, z2 = (x + y).chunk(2, dim=1)
             return z1 * z2
@@ -650,7 +700,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_fusion_rand(self):
+    def test_fusion_rand_cuda(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
 
@@ -674,7 +724,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_fusion_arg_configurations(self):
+    def test_fusion_arg_configurations_cuda(self):
         # A smoke test to make sure we won't use the same kernel for contiguous
         # and non-contiguous arguments.
         # TODO: add optionally enabled debug counters to the fuser to verify
@@ -699,7 +749,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_comparison_gt_lt(self):
+    def test_comparison_gt_lt_cuda(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
@@ -708,7 +758,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_comparison_ge_le(self):
+    def test_comparison_ge_le_cuda(self):
         def f(x, y):
             mask = (x >= 0).type_as(x)
             z = x * mask + y
@@ -728,7 +778,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_relu(self):
+    def test_relu_cuda(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
@@ -736,7 +786,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_small_constant(self):
+    def test_small_constant_cuda(self):
         def fn_test_small_constant(x, y):
             return (1e-8 * x + 5e-9 * y) * 1e8
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
@@ -751,7 +801,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_exp(self):
+    def test_exp_cuda(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
@@ -890,7 +940,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     @skipIfRocm
-    def test_fuse_last_device(self):
+    def test_fuse_last_device_cuda(self):
         device = 'cuda:' + str(1)
         x = torch.tensor([0.4], dtype=torch.float, device=device)
         y = torch.tensor([0.7], dtype=torch.float, device=device)
@@ -915,6 +965,7 @@ class TestJit(JitTestCase):
 
         torch.jit.verify(f, (x, y), loss_fn=lambda z, w: z * w, devices=[])
 
+    @suppress_warnings
     def test_constant(self):
         x = torch.randn(2, 2, requires_grad=True)
 
@@ -1030,6 +1081,34 @@ class TestJit(JitTestCase):
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
 
+    def test_trace_casts(self):
+        casts = [
+            lambda x: x.byte(),
+            lambda x: x.float(),
+            lambda x: x.cpu(),
+            lambda x: x.to(device='cpu'),
+            lambda x: x.to(dtype=torch.int64),
+            lambda x: x.to(device='cpu', dtype=torch.float),
+            lambda x: x.to(x)
+        ]
+
+        def assertContainsCast(trace):
+            self.assertEqual(sum(n.kind() == 'aten::to' for n in trace.graph.nodes()), 1)
+
+        for cast in casts:
+            trace = torch.jit.trace(cast, torch.randn(2, 2))
+            assertContainsCast(trace)
+            x = torch.randn(2, 2)
+            self.assertEqual(trace(x), cast(x))
+
+        def to_tensor(x, y):
+            return x.to(y)
+
+        to_tensor_trace = torch.jit.trace(to_tensor, (torch.randn(2, 2), torch.randn(1, 8)))
+        assertContainsCast(to_tensor_trace)
+        x, y = torch.randn(2, 2), torch.randn(1, 10)
+        self.assertEqual(to_tensor_trace(x, y), to_tensor(x, y))
+
     def test_trace_warn(self):
         def fn(x):
             int(x)  # Warning 1.
@@ -1066,6 +1145,17 @@ class TestJit(JitTestCase):
         self.assertEqual(traced_fn(x, y), fn(x, y))
         self.assertExpectedGraph(traced_fn.graph)
         self.assertExportImport(traced_fn.graph, (x, y))
+
+    def test_trace_random(self):
+        def f(mean, std):
+            return torch.normal(mean, std)
+
+        traced = torch.jit.trace(f, (torch.zeros(2, 3), torch.ones(2, 3)), check_trace=False)
+        mean, std = torch.zeros(5, 5), torch.ones(5, 5)
+        with torch.random.fork_rng(devices=[]):
+            output = f(mean, std)
+        traced_output = traced(mean, std)
+        self.assertEqual(output, traced_output)
 
     def test_trace_tensor_factory(self):
         def run(**kwargs):
@@ -1166,7 +1256,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
-    def test_cpp(self):
+    def test_cpp_cuda(self):
         # rather than rebuild assertExpected in cpp,
         # just glob all the cpp outputs into one file for now
         self.assertExpected(torch._C._jit_run_cpp_tests())
@@ -1320,10 +1410,22 @@ class TestJit(JitTestCase):
         x = torch.randn(5, 5)
         self.assertEqual(foo(x), x + x + x)
 
+    def test_einsum(self):
+        def outer(x, y):
+            return torch.einsum('i,j->ij', (x, y))
+
+        traced = torch.jit.trace(outer, (torch.randn(4), torch.randn(5)))
+        script = torch.jit.script(outer)
+        fns = [traced, script]
+        x, y = torch.randn(10), torch.randn(2)
+        for fn in [traced, script]:
+            self.assertGraphContains(fn.graph, kind='aten::einsum')
+            self.assertEqual(fn(x, y), outer(x, y))
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
     @skipIfRocm
-    def test_traced_module(self):
+    def test_traced_module_cuda(self):
         class Model(nn.Module):
             def __init__(self, num_features, num_layers):
                 super(Model, self).__init__()
@@ -1396,6 +1498,25 @@ class TestJit(JitTestCase):
         def fn(x):
             return MyFn.apply(x + 2) + 3
 
+        x = torch.tensor([1., 2., 3.])
+        y = torch.randn(2, 2, requires_grad=True)
+        fn(x)
+        fn(y)
+
+    def test_python_function_tup(self):
+        class MyFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x + 1, x - 1
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, grad_output
+
+        @_trace(torch.zeros(2))
+        def fn(x):
+            a, b = MyFn.apply(x + 2)
+            return a + b + 3
         x = torch.tensor([1., 2., 3.])
         y = torch.randn(2, 2, requires_grad=True)
         fn(x)
@@ -1582,6 +1703,145 @@ class TestJit(JitTestCase):
         traced = torch.jit.trace(foo, (torch.rand(5, 4),))
         test_x = torch.rand(6, 3)
         self.assertEqual(foo(test_x), traced(test_x))
+
+    def test_export_expand_aten_fallback(self):
+        class ExpandTest(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                y = x
+                for i in range(5):
+                    y = x.expand([3, 4, i])
+                return y
+
+        mod = ExpandTest()
+        example_outs = mod(torch.rand(3, 4, 1))
+        f = io.BytesIO()
+        with self.assertRaisesRegex(RuntimeError, 'Could not export a broadcasted operation'):
+            torch.onnx.export_to_pretty_string(mod, (torch.rand(3, 4, 1),), f, verbose=False,
+                                               example_outputs=example_outs)
+
+        self.assertExpected(
+            torch.onnx.export_to_pretty_string(mod, (torch.rand(3, 4, 1),), f, verbose=False,
+                                               example_outputs=example_outs,
+                                               operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK))
+
+    def test_export_dropout(self):
+        test = torch.nn.Dropout()
+        test.eval()
+
+        traced = torch.jit.trace(test, (torch.rand(3, 4),), check_trace=False)
+        imported = self.getExportImportCopy(traced)
+        x = torch.randn(3, 4)
+        self.assertEqual(traced(x), imported(x))
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_cuda_export_restore(self):
+        class Sub(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sub, self).__init__()
+                self.weight = nn.Parameter(torch.randn(3, 4))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.mod = Sub()
+
+            @torch.jit.script_method
+            def forward(self, v):
+                return self.mod(v)
+        m = M()
+        m.cuda()
+        m2 = self.getExportImportCopy(m)
+        m2.cuda()
+        input = torch.rand(3, 4).cuda()
+        self.assertEqual(m(input), m2(input))
+
+    def test_export_batchnorm(self):
+        for mode in ['eval', 'train']:
+            for clazz in [
+                    torch.nn.BatchNorm1d(100),
+                    torch.nn.BatchNorm1d(100, affine=False),
+                    torch.nn.BatchNorm2d(100),
+                    torch.nn.BatchNorm2d(100, affine=False)]:
+                getattr(clazz, mode)()
+
+                input = torch.randn(20, 100) if isinstance(clazz, torch.nn.BatchNorm1d) else \
+                    torch.randn(20, 100, 35, 45)
+
+                traced = torch.jit.trace(clazz, (input,))
+                imported = self.getExportImportCopy(traced)
+                x = torch.randn(20, 100) if isinstance(clazz, torch.nn.BatchNorm1d) else \
+                    torch.randn(20, 100, 35, 45)
+                self.assertEqual(traced(x), imported(x))
+
+    def test_export_rnn(self):
+        for clazz in [nn.RNN(10, 20, 2), nn.GRU(10, 20, 2)]:
+            class RNNTest(torch.nn.Module):
+                def __init__(self):
+                    super(RNNTest, self).__init__()
+                    self.rnn = clazz
+
+                def forward(self, x, lengths, h0):
+                    packed = torch.nn.utils.rnn.pack_padded_sequence(x, lengths)
+                    out, h = self.rnn(packed, h0)
+                    padded_outs, _ = torch.nn.utils.rnn.pad_packed_sequence(out)
+                    return padded_outs
+
+            test = RNNTest()
+
+            traced = torch.jit.trace(test, (torch.randn(5, 3, 10), torch.LongTensor([3, 2, 1]), torch.randn(2, 3, 20)))
+            imported = self.getExportImportCopy(traced)
+            x, lengths, h0 = torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20)
+            self.assertEqual(traced(x, lengths, h0), imported(x, lengths, h0))
+
+    def test_export_lstm(self):
+        class LSTMTest(torch.nn.Module):
+            def __init__(self):
+                super(LSTMTest, self).__init__()
+                self.rnn = nn.LSTM(10, 20, 2)
+
+            def forward(self, x, lengths, hiddens):
+                h0, c0 = hiddens
+                packed = torch.nn.utils.rnn.pack_padded_sequence(x, lengths)
+                out, (h, c) = self.rnn(packed, (h0, c0))
+                padded_outs, _ = torch.nn.utils.rnn.pad_packed_sequence(out)
+                return padded_outs
+
+        test = LSTMTest()
+
+        traced = torch.jit.trace(test, (torch.randn(5, 3, 10),
+                                        torch.LongTensor([3, 2, 1]),
+                                        (torch.randn(2, 3, 20), torch.randn(2, 3, 20))))
+        imported = self.getExportImportCopy(traced)
+        x, lengths, h0, c0 = \
+            torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
+        self.assertEqual(traced(x, lengths, (h0, c0)), imported(x, lengths, (h0, c0)))
+
+    def test_trace_variable_instantiation(self):
+        def random_foo(x):
+            return Variable(Variable(x) + 1.0)
+
+        random_foo_traced = torch.jit.trace(random_foo, (torch.rand(3, 4),))
+
+        x = torch.rand(5, 6)
+        self.assertEqual(random_foo(x), random_foo_traced(x))
+
+    def test_trace_slice_expr_complete_type(self):
+        def random_foo(x):
+            return x + 1.0
+
+        random_foo_traced = torch.jit.trace(random_foo, (torch.rand(3, 4),))
+
+        @torch.jit.script
+        def random_bar(x):
+            return random_foo_traced(x)[0:1]
+
+        x = torch.rand(3, 4)
+        self.assertEqual(random_bar(x), (x + 1)[0:1])
 
 
 class TestBatched(TestCase):
@@ -2368,16 +2628,51 @@ a")
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.checkScript(func, [x], optimize=True)
 
+    def test_random(self):
+        @torch.jit.script
+        def f(mean, std):
+            return torch.normal(mean, std)
+
+        mean, std = torch.zeros(5, 5), torch.ones(5, 5)
+        with torch.random.fork_rng(devices=[]):
+            output = torch.normal(mean, std)
+        with torch.random.fork_rng(devices=[]):
+            script_output = f(mean, std)
+        self.assertEqual(output, script_output)
+
+    def _check_code(self, code_str, fn_name, inputs):
+        scope = {}
+        exec(code_str, globals(), scope)
+        cu = torch.jit.CompilationUnit(code_str)
+        self.assertEqual(cu.func(*inputs), scope[fn_name](*inputs))
+
+    @unittest.skipIf(not RUN_CUDA, 'no CUDA')
+    def test_scriptmodule_releases_tensors_cuda(self):
+        @torch.jit.script
+        def fn(x, y):
+            return x.sigmoid() * y.tanh()
+
+        def test(backward=False):
+            x = torch.randn(3, 3, dtype=torch.double, device='cuda', requires_grad=True)
+            y = torch.randn(3, 3, dtype=torch.double, device='cuda', requires_grad=True)
+            out = fn(x, y)
+            if backward:
+                out.sum().backward()
+
+        with self.assertLeaksNoCudaTensors():
+            test()
+            test()
+            test()
+
+        with self.assertLeaksNoCudaTensors():
+            test(backward=True)
+            test(backward=True)
+            test(backward=True)
+
     def test_index(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()
             return torch.arange(numel).view(size)
-
-        def check_code(code_str, fn_name, inputs):
-            scope = {}
-            exec(code_str, globals(), scope)
-            cu = torch.jit.CompilationUnit(code_str)
-            self.assertEqual(cu.func(*inputs), scope['func'](*inputs))
 
         def check_indexing(indexing, tensor):
             template = dedent("""
@@ -2385,7 +2680,7 @@ a")
                 return x{}
             """)
 
-            check_code(template.format(indexing), "func", [tensor])
+            self._check_code(template.format(indexing), "func", [tensor])
 
         def check_dynamic_indexing(indexing, tensor, value1, value2):
             value1 = torch.tensor(value1)
@@ -2398,7 +2693,7 @@ a")
                 return x{}
             """)
 
-            check_code(template.format(indexing), "func", [tensor, value1, value2])
+            self._check_code(template.format(indexing), "func", [tensor, value1, value2])
 
         # basic slices
         check_indexing('[0]', consec((3, 3)))
@@ -2496,6 +2791,93 @@ a")
         for tensor in tensors:
             for i in range(len(script_funs)):
                 self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))
+
+    def test_advancedindex(self):
+        def consec(size, start=0):
+            numel = torch.tensor(size).prod().item()
+            return torch.arange(numel).view(size)
+
+        def check_indexing(indexing, tensor, **kwargs):
+            indices_dict = kwargs
+
+            template = dedent("""
+            def func(x{formals}):
+                return x{expr}
+            """)
+
+            formals = []
+            values = []
+            for formal, value in indices_dict.items():
+                formals.append(formal)
+                values.append(value)
+
+            formals = ''.join(map(', {}'.format, formals))
+            inputs = [tensor] + values
+
+            self._check_code(template.format(formals=formals, expr=indexing),
+                             "func", inputs)
+
+        # Indexing with tensor (basic)
+        check_indexing('[i]', consec((3, 3)), i=torch.tensor([0]))
+        check_indexing('[i]', consec((3, 3)), i=torch.tensor(1))
+        check_indexing('[i]', consec((3, 3)), i=torch.tensor([-2]))
+        check_indexing('[i]', consec((3, 3), 2), i=torch.tensor([0, 0]))
+        check_indexing('[i]', consec((3, 3, 2, 2)), i=torch.tensor([0, -2, 1]))
+
+        # NB: indexing with tensors and indexing with sequences can be implemented
+        # in a very similar way (sequences are converted to tensors), so only one
+        # case needs to be tested extensively.
+        # XXX: When we can index with sequences, replace these cases with
+        # sequence indexing expressions; those are much easier to read.
+
+        # Misc sequence advanced indexing
+        inp = consec((4, 8, 5))
+        to_check = [
+            # [[0, 2], [1, 3]]
+            ['[i, j]', dict(i=[0, 2], j=[1, 3])],
+            # [[0, 2], [1, 3], [1, 1]]
+            ['[i, j, k]', dict(i=[0, 2], j=[1, 3], k=[1, 1])],
+            # [[0, 2], 1, [1, 1]]
+            ['[i, j, k]', dict(i=[0, 2], j=1, k=[1, 1])],
+            # [:, :, [0, 3, 4]]
+            ['[:, :, i]', dict(i=[0, 3, 4])],
+            # [:, [2, 4, 5, 7], 2:4]
+            ['[:, i, 2:4]', dict(i=[0, 2, 3])],
+            # [[2, 3], :, :]
+            ['[i, :, :]', dict(i=[2, 3])],
+            # [:, [0, 2, 3], [1, 3, 4]]
+            ['[:, i, j]', dict(i=[0, 2, 3], j=[1, 3, 4])],
+            # [:, [0], [1, 2, 4]]
+            ['[:, i, j]', dict(i=[0], j=[1, 2, 4])],
+            # [:, [0, 1, 3], [4]]
+            ['[:, i, j]', dict(i=[0, 1, 3], j=[4])],
+            # [:, [[0, 1], [1, 0]], [[2, 3]]]
+            ['[:, i, j]', dict(i=[[0, 1], [1, 0]], j=[[2, 3]])],
+            # [:, [[0, 1], [2, 3]], [[0]]]
+            ['[:, i, j]', dict(i=[[0, 1], [2, 3]], j=[[0]])],
+            # [:, [[5, 6]], [[0, 3], [4, 4]]]
+            ['[:, i, j]', dict(i=[[5, 6]], j=[[0, 3], [4, 4]])],
+            # [[0, 2, 3], [1, 3, 4], :]
+            ['[i, j, :]', dict(i=[0, 2, 3], j=[1, 3, 4])],
+            # [0, [1, 2, 4], :]
+            ['[i, j, :]', dict(i=0, j=[1, 2, 4])],
+            # [[0, 1, 3], 4, :]
+            ['[i, j, :]', dict(i=[0, 1, 3], j=4)],
+            # [[[0, 1], [1, 0]], [[2, 1], [3, 5]], :]
+            ['[i, j, :]', dict(i=[[0, 1], [1, 0]], j=[[2, 1], [3, 5]])],
+            # [[[0, 1], [1, 0]], [[2, 3]], :]
+            ['[i, j, :]', dict(i=[[0, 1], [1, 0]], j=[[2, 3]])],
+            # [[[0, 1], [2, 3]], [[0]], :]
+            ['[i, j, :]', dict(i=[[0, 1], [2, 3]], j=[[0]])],
+            # [[[2, 1]], [[0, 3], [4, 4]], :]
+            ['[i, j, :]', dict(i=[[2, 1]], j=[[0, 3], [4, 4]])],
+            # [[[2]], [[0, 3], [4, 1]], 0:2]
+            ['[i, j, 0:2]', dict(i=[[2]], j=[[0, 3], [4, 1]])],
+        ]
+
+        for expr, argdict in to_check:
+            tensordict = {k: torch.tensor(v) for (k, v) in argdict.items()}
+            check_indexing(expr, inp, **tensordict)
 
     def test_keyword(self):
         @torch.jit.script
@@ -2951,6 +3333,7 @@ a")
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skip("this test is flaky, see #11360")
     def test_scalar_fusion(self):
         def fn(x, y):
             return x + y.type_as(x)
@@ -3408,19 +3791,32 @@ a")
         template = dedent('''
         # int, int -> int
         def func1():
-            return 8 {op} 2
+            return 7 {op} 2
 
         def func2():
-            return 2 {op} 2
+            return 3 {op} 2
 
-        # float, float -> float
         def func3():
-            return 3.14 {op} 0.125
+            return -7 {op} 3
 
         def func4():
+            return 7 {op} -3
+
+        # float, float -> float
+        def func5():
+            return 3.14 {op} 0.125
+
+        def func6():
             return 3.14 {op} 3.14
+
+        def func7():
+            return -0.5 {op} 2.0
+
+        def func8():
+            return 3.5 {op} -2.0
+
         ''')
-        ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
+        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
 
         for op in ops:
             code = template.format(op=op)
@@ -3432,6 +3828,10 @@ a")
             self.assertEqual(cu.func2(), scope['func2']())
             self.assertEqual(cu.func3(), scope['func3']())
             self.assertEqual(cu.func4(), scope['func4']())
+            self.assertEqual(cu.func5(), scope['func5']())
+            self.assertEqual(cu.func6(), scope['func6']())
+            self.assertEqual(cu.func7(), scope['func7']())
+            self.assertEqual(cu.func8(), scope['func8']())
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
@@ -3483,10 +3883,10 @@ a")
             cu = torch.jit.CompilationUnit(code)
             self.assertEqual(cu.func(tensor), scope['func'](tensor))
 
-        var_int = 2
-        var_float = 1.4321
+        var_int = [2, -2]
+        var_float = [1.4321, -1.2]
 
-        ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
+        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
         # TODO: turn this on for py3 (and add PY3 division semantics)
         ops_py2_only = ['/']
         if PY2:
@@ -3498,12 +3898,16 @@ a")
         long_tensor[long_tensor == 0] = 2
 
         tensors = [float_tensor, double_tensor, long_tensor]
-        consts = [var_int, var_float]
+        consts = var_int + var_float
 
         for op, tensor, const, swap_args in product(ops, tensors, consts, [True, False]):
             # FIXME: things like 2 / long_tensor are not implemented correctly
             # Look in torch/tensor.py to see how pytorch implements it.
             if op == '/' and tensor.data_ptr() == long_tensor.data_ptr():
+                continue
+
+            # % operator does not take: const % tensor
+            if op == '%' and swap_args is True:
                 continue
 
             test(op, const, swap_args)
@@ -4219,6 +4623,32 @@ a")
 
             f = io.BytesIO()
             torch.onnx._export(m, (x, seq_lens), f, verbose=False)
+
+    def test_python_call_non_tensor(self):
+        def foo(a, b, c):
+            # type: (Tensor, int, Tuple[Tensor, int]) -> Tuple[int, Tensor]
+            d, e = c
+            return b + e, a + d
+
+        @torch.jit.script
+        def bar():
+            x = torch.ones(3, 4)
+            a, b = foo(x, 3, (x, 3))
+            return a, b
+
+        self.assertEqual((6, torch.ones(3, 4) + 1), bar())
+
+    def test_python_call_non_tensor_wrong(self):
+        with self.assertRaisesRegex(RuntimeError, r"but instead got value of type tuple"):
+            def foo():
+                # type: () -> Tensor
+                return ((3, 4),)
+
+            @torch.jit.script
+            def bar():
+                return foo()
+
+            bar()
 
     def test_tuples(self):
         @torch.jit.script
@@ -5552,7 +5982,7 @@ a")
                 return foo(torch.full([1], 1), torch.full([1], 2), torch.full([1], 3))
 
     def test_wrong_return_type(self):
-        with self.assertRaisesRegex(RuntimeError, 'Python functions can currently only return Tensors'):
+        with self.assertRaisesRegex(RuntimeError, 'but instead got value of type tuple'):
             def somefunc():
                 # type: () -> Tuple[Tuple[Tensor, Tensor]]
                 return torch.zeros(3, 4), torch.zeros(4, 5)
@@ -5560,6 +5990,7 @@ a")
             @torch.jit.script
             def wrong_return_type():
                 return somefunc()
+            wrong_return_type()
 
     # Tests for calling between different front-end modes
     def test_call_python_fn_from_tracing_fn(self):
@@ -6017,7 +6448,7 @@ a")
             target[indices] = rhs
             return target
 
-        self.assertExpected(str(test_index_put.graph))
+        self.assertExpectedGraph(test_index_put.graph)
 
     def test_index_put_trace_without_view(self):
         @_trace(torch.rand(100), torch.tensor([1, 2, 3, 4]), torch.rand(4))
@@ -6025,7 +6456,7 @@ a")
             target[indices] = rhs
             return target
 
-        self.assertExpected(str(test_index_put.graph))
+        self.assertExpectedGraph(test_index_put.graph)
 
     def test_annotated_script_fn(self):
         @torch.jit.script
@@ -6399,9 +6830,29 @@ a")
         self.assertEqual(foo(input), input)
 
 
+class MnistNet(nn.Module):
+    def __init__(self):
+        super(MnistNet, self).__init__()
+        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+        self.conv2_drop = nn.Dropout2d()
+        self.fc1 = nn.Linear(320, 50)
+        self.fc2 = nn.Linear(50, 10)
+
+    def forward(self, x):
+        x = F.relu(F.max_pool2d(self.conv1(x), 2))
+        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
+        x = x.view(-1, 320)
+        x = F.relu(self.fc1(x))
+        x = F.dropout(x, training=self.training)
+        x = self.fc2(x)
+        return F.log_softmax(x, dim=1)
+
+
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
-    def test_dcgan_models(self):
+    @staticmethod
+    def _test_dcgan_models(self, device, check_export_import=True):
         class DCGANGenerator(nn.Module):
             def __init__(self, nz, ngf, nc):
                 super(DCGANGenerator, self).__init__()
@@ -6459,10 +6910,22 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return self.main(input).view(-1, 1).squeeze(1)
 
         bs, nz, ngf, nc, ndf = 5, 6, 9, 3, 10
-        self.checkTrace(DCGANGenerator(nz, ngf, nc), (torch.rand(bs, nz, 1, 1),))
-        example_input = DCGANGenerator(nz, ngf, nc)(torch.rand(bs, nz, 1, 1))
-        self.checkTrace(DCGANDiscriminator(nc, ndf), (example_input,))
+        self.checkTrace(DCGANGenerator(nz, ngf, nc).to(device),
+                        (torch.rand(bs, nz, 1, 1, device=device),),
+                        export_import=check_export_import)
+        example_input = DCGANGenerator(nz, ngf, nc).to(device)(torch.rand(bs, nz, 1, 1, device=device))
+        self.checkTrace(DCGANDiscriminator(nc, ndf).to(device), (example_input,),
+                        export_import=check_export_import)
 
+    def test_dcgan_models(self):
+        self._test_dcgan_models(self, device='cpu')
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_dcgan_models_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_dcgan_models(self, device='cuda', check_export_import=False)
+
+    # XXX: When this is fixed, write a CUDA test for this.
     @unittest.skip('https://github.com/pytorch/pytorch/issues/8439 InstanceNormalization bug')
     def test_neural_style(self):
         class TransformerNet(torch.nn.Module):
@@ -6563,29 +7026,45 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
         self.checkTrace(TransformerNet(), (torch.rand(5, 3, 224, 224),))
 
-    def test_mnist(self):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
-                self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-                self.conv2_drop = nn.Dropout2d()
-                self.fc1 = nn.Linear(320, 50)
-                self.fc2 = nn.Linear(50, 10)
-
-            def forward(self, x):
-                x = F.relu(F.max_pool2d(self.conv1(x), 2))
-                x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-                x = x.view(-1, 320)
-                x = F.relu(self.fc1(x))
-                x = F.dropout(x, training=self.training)
-                x = self.fc2(x)
-                return F.log_softmax(x, dim=1)
-
+    @staticmethod
+    def _test_mnist(self, device, check_export_import=True):
         # eval() is present because dropout makes this nondeterministic
-        self.checkTrace(Net().eval(), (torch.rand(5, 1, 28, 28),))
+        self.checkTrace(MnistNet().to(device).eval(), (torch.rand(5, 1, 28, 28, device=device),),
+                        export_import=check_export_import)
 
-    def test_reinforcement_learning(self):
+    def test_mnist(self):
+        self._test_mnist(self, device='cpu')
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_mnist_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_mnist(self, device='cuda', check_export_import=False)
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_mnist_training_leaks_no_memory_cuda(self):
+        net = MnistNet().cuda()
+        traced_net = torch.jit.trace(net, [torch.randn(5, 1, 28, 28, device='cuda')])
+
+        def train(iters):
+            for _ in range(iters):
+                # Get some fake data
+                inp = torch.randn(5, 1, 28, 28, device='cuda')
+                out = traced_net(inp)
+
+                # Here's some fake loss
+                out.sum().backward()
+
+                # Zero out grads
+                traced_net.zero_grad()
+
+        # Set it up so the params have .grad fields so they are not reported as leaks
+        train(1)
+
+        with self.assertLeaksNoCudaTensors():
+            train(5)
+
+    @staticmethod
+    def _test_reinforcement_learning(self, device, test_export_import=True):
         class Policy(nn.Module):
             def __init__(self):
                 super(Policy, self).__init__()
@@ -6597,10 +7076,19 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 action_scores = self.affine2(x)
                 return F.softmax(action_scores, dim=1)
 
-        self.checkTrace(Policy(), (torch.rand(1, 4),))
+        self.checkTrace(Policy().to(device), (torch.rand(1, 4, device=device),),
+                        export_import=test_export_import)
 
-    @skipIfRocm
-    def test_snli(self):
+    def test_reinforcement_learning(self):
+        self._test_reinforcement_learning(self, device='cpu')
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_reinforcement_learning_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_reinforcement_learning(self, device='cuda', test_export_import=False)
+
+    @staticmethod
+    def _test_snli(self, device, check_export_import=True):
         class Bottle(nn.Module):
 
             def forward(self, input):
@@ -6684,13 +7172,24 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             n_layers = 2
             n_cells = 4  # 2 * n_layers because birnn = True
 
-        premise = torch.LongTensor(48, 128).random_(0, 100)
-        hypothesis = torch.LongTensor(24, 128).random_(0, 100)
+        premise = torch.LongTensor(48, 128).random_(0, 100).to(device)
+        hypothesis = torch.LongTensor(24, 128).random_(0, 100).to(device)
 
-        self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False)
+        self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
+                        inputs_require_grads=False, export_import=check_export_import)
 
     @skipIfRocm
-    def test_super_resolution(self):
+    def test_snli(self):
+        self._test_snli(self, device='cpu')
+
+    @skipIfRocm
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_snli_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_snli(self, device='cuda', check_export_import=False)
+
+    @staticmethod
+    def _test_super_resolution(self, device, check_export_import=True):
         import torch.nn.init as init
 
         class Net(nn.Module):
@@ -6712,9 +7211,21 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 x = self.pixel_shuffle(self.conv4(x))
                 return x
 
-        net = Net(upscale_factor=4)
-        self.checkTrace(net, (torch.rand(5, 1, 64, 64),))
+        net = Net(upscale_factor=4).to(device)
+        self.checkTrace(net, (torch.rand(5, 1, 64, 64, device=device),),
+                        export_import=check_export_import)
 
+    @skipIfRocm
+    def test_super_resolution(self):
+        self._test_super_resolution(self, device='cpu')
+
+    @skipIfRocm
+    @unittest.skipIf(not RUN_CUDA, 'no CUDA')
+    def test_super_resolution_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_super_resolution(self, device='cuda', check_export_import=False)
+
+    @suppress_warnings
     def test_time_sequence_prediction(self):
         class Sequence(torch.jit.ScriptModule):
             def __init__(self):
@@ -6769,9 +7280,11 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return outputs
 
         # TODO: toggle export_import once above issues are fixed
-        self.checkTrace(Sequence(), (torch.rand(3, 4),), export_import=False)
+        self.checkTrace(Sequence(), (torch.rand(3, 4),),
+                        export_import=False)
 
-    def test_vae(self):
+    @staticmethod
+    def _test_vae(self, device, check_export_import=True):
         class VAE(nn.Module):
             def __init__(self):
                 super(VAE, self).__init__()
@@ -6804,7 +7317,16 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return self.decode(z), mu, logvar
 
         # eval() is present because randn_like makes this nondeterministic
-        self.checkTrace(VAE().eval(), (torch.rand(128, 1, 28, 28),))
+        self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
+                        export_import=check_export_import)
+
+    def test_vae(self):
+        self._test_vae(self, device='cpu')
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_vae_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_vae(self, device='cuda', check_export_import=False)
 
 
 # Smoke tests for export methods
@@ -6866,16 +7388,19 @@ class TestPytorchExportModes(JitTestCase):
 EXCLUDE_TRACED = {
     'test_split_dim',
     'test_split_dim_neg0',
+}
 
-    # nn functional test
-    # schema not found for onnx node
-    'test_nn_instance_norm',
-
-    # output no dependence with traced input, tracer confusion
-    'test_nn_rrelu',
-
-    # aten op has additional cudnn argument
-    'test_nn_group_norm',
+EXCLUDE_TYPE_CHECK = {
+    # slogdet tests use itemgetter to select its only differentiable output,
+    # but this happens outside of the graph we handle, so there are fewer
+    # reference outputs than graph outputs.
+    'test_slogdet_1x1_neg_det',
+    'test_slogdet_1x1_pos_det',
+    'test_slogdet_distinct_singular_values',
+    'test_slogdet_neg_det',
+    'test_slogdet_pos_det',
+    'test_slogdet_symmetric',
+    'test_slogdet_symmetric_pd',
 }
 
 # known to be failing in script
@@ -6904,9 +7429,6 @@ EXCLUDE_SCRIPT = {
     'test_norm_inf',
     'test_renorm_norm_inf',
     'test_split',
-    'test_split_size_list',
-    'test_split_size_list_dim',
-    'test_split_size_list_dim_neg0',
     'test_expand',
     'test_expand_1_element',
     'test_expand_new_dim',
@@ -6919,18 +7441,17 @@ EXCLUDE_SCRIPT = {
     'test_repeat_scalar',
     'test_repeat_single_number',
     'test_repeat_unsqueeze',
-    'test_reshape',
     'test_reshape_1d',
     'test_reshape_scalar_to_1d',
-    'test_reshape_size',
     'test_view',
     'test_view_1d',
     'test_view_scalar_to_1d',
-    'test_view_size',
     'test_split_dim',
     'test_split_dim_neg0',
     'test_gesv',
     'test_inverse',
+    'test_matrix_power_n=-1',  # involves inverse
+    'test_matrix_power_n=-3',  # involves inverse
     # skipped nn functional tests
     # ops involves sampling which could not test
     'test_nn_dropout',
@@ -6942,13 +7463,16 @@ EXCLUDE_SCRIPT = {
     'test_nn_adaptive_max_pool1d',
     'test_nn_adaptive_max_pool2d',
     'test_nn_adaptive_max_pool3d',
+    'test_nn_ctc_loss',
 
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
+    'test_nn_max_unpool3d',
     'test_nn_embedding',
     'test_nn_embedding_bag',
     'test_nn_batch_norm',
+
     # aten op has additional cudnn argument
     'test_nn_group_norm',
     'test_nn_nll_loss',
@@ -6978,6 +7502,8 @@ EXCLUDE_SCRIPT = {
     'test_nn_lp_pool1d',
     'test_nn_lp_pool2d',
     'test_nn_instance_norm',
+    'test_nn_grid_sample',
+    'test_nn_gumbel_softmax',
 }
 
 
@@ -6994,11 +7520,15 @@ def partial_apply_nontensors(fn, args, **kwargs):
     return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor)]
 
 
-def create_traced_fn(fn):
+# create a trace function from input fn
+def create_traced_fn(self, fn):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         traced = torch.jit.trace(fn_tensors, inputs_tensors)
-        return traced(*inputs_tensors)
+        self.assertExportImport(traced.graph, inputs_tensors)
+        output = traced(*inputs_tensors)
+        traced_fn.last_graph = traced.graph_for(*inputs_tensors)
+        return output
     return traced_fn
 
 script_template = '''
@@ -7007,7 +7537,10 @@ def the_method({}):
 '''
 
 
-def create_script_fn(method_name, func_type, output_process_fn):
+# create a script function from (name, func_type, output_process_fn),
+# returns a function takes in (args, kwargs) and runs the compiled function and
+# then applies the post process fn to the outputs
+def create_script_fn(self, method_name, func_type, output_process_fn):
     def script_fn(*args, **kwargs):
         formals = []
         tensors = []
@@ -7034,11 +7567,31 @@ def create_script_fn(method_name, func_type, output_process_fn):
 
         script = script_template.format(', '.join(formals), call)
         CU = torch.jit.CompilationUnit(script)
-        return output_process_fn(CU.the_method(*tensors))
+        self.assertExportImport(CU.the_method.graph, tensors)
+        output = output_process_fn(CU.the_method(*tensors))
+        script_fn.last_graph = CU.the_method.graph_for(*tensors)
+        return output
     return script_fn
 
 
-def check_against_reference(self, func, reference_func, args, kwargs=None, allow_unused=True):
+def check_output_types(self, func, ref_outputs, args, kwargs):
+    graph = getattr(func, 'last_graph', None)
+    if not isinstance(ref_outputs, tuple):
+        ref_outputs = (ref_outputs,)
+    types = [o.type() for o in graph.outputs()]
+    self.assertEqual(len(types), len(ref_outputs))
+    for i, (t, ref_out) in enumerate(zip(types, ref_outputs)):
+        if isinstance(ref_out, list):
+            assert len(ref_out) > 0
+            elem = ref_out[0]
+            assert isinstance(elem, torch.Tensor)
+            self.assertTrue(t.isSubtypeOf(torch._C.ListType.ofTensors()))
+        else:
+            ref_type = torch._C.Type.inferFrom(ref_out)
+            self.assertTrue(ref_type.isSubtypeOf(t))
+
+
+def check_against_reference(self, func, reference_func, args, kwargs=None, allow_unused=True, check_types=True):
     kwargs = kwargs if kwargs else {}
 
     def allSum(vs):
@@ -7062,6 +7615,9 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     outputs = reference_func(*nograd_inputs, **kwargs)
     outputs_test = func(*nograd_inputs, **kwargs)
     self.assertEqual(outputs, outputs_test)
+
+    if check_types:
+        check_output_types(self, func, outputs_test, nograd_inputs, kwargs)
 
     # test single grad case
     outputs = reference_func(*recording_inputs, **kwargs)
@@ -7102,7 +7658,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
         self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
 
 
-class TestJitGenerated(TestCase):
+class TestJitGenerated(JitTestCase):
     pass
 
 
@@ -7261,6 +7817,7 @@ nn_functional_tests = [
     ('max_pool3d', (S, S, S, S, S), (2, 1)),
     ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
     ('max_unpool2d', torch.tensor([[[[2., 4]]]]), (torch.tensor([[[[1, 3]]]]), 2, 2, 0)),
+    ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
     ('lp_pool1d', (S, S, S), (2, 3, 2,)),
     ('lp_pool2d', (S, S, S, S), (2, 3, 2,)),
     ('adaptive_max_pool1d', (S, S, S), (5,)),
@@ -7323,24 +7880,27 @@ nn_functional_tests = [
     ('normalize', (S, S, S), (),),
     ('unfold', (S, S, S, S), ([2, 3]),),
     ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
-
-    # distribution sampling make result different in every run for below ops:
-    # ('gumbel_softmax', (S, S), (2,),),
-    #
-    #  No high order gradient for the below ops
-    # ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
-    # ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
-    # ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
-    # ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),),),
-    # ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)),),),
-    # ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), (torch.randint(1, S + 1, (S, S),
-    # dtype=torch.long), torch.full((S,), S, dtype=torch.long), torch.randint(1,S,(S,), dtype=torch.long))),
+    ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
+    ('gumbel_softmax', (S, S), (2,),),
+    ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
+    ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)), \
+                                   1, 1, non_differentiable(torch.randn(S))),),
+    ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)), \
+                                                           non_differentiable(torch.randn(3, 2))),),
+    ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), \
+     (torch.randint(1, S + 1, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
+      torch.randint(1, S, (S,), dtype=torch.long))),
 ]
 
 
 # Test names in this set are only checked for a single derivative
 nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'pdist',
+    'multilabel_margin_loss',
+    'max_unpool3d',
+    'multi_margin_loss',
+    'binary_cross_entropy',
+    'ctc_loss',
 ])
 
 
@@ -7384,15 +7944,19 @@ def add_test(
                     output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
                     return output_process_fn(output)
 
+                check_types = test_name not in EXCLUDE_TYPE_CHECK
+
                 if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
                     if test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(fn),
-                                                fn, (self_variable,) + args_variable, kwargs_variable)
+                        check_against_reference(self, create_traced_fn(self, fn),
+                                                fn, (self_variable,) + args_variable, kwargs_variable,
+                                                check_types=check_types)
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-                                                create_script_fn(name, 'method', output_process_fn),
-                                                fn, (self_variable,) + args_variable, kwargs_variable)
+                                                create_script_fn(self, name, 'method', output_process_fn),
+                                                fn, (self_variable,) + args_variable, kwargs_variable,
+                                                check_types=check_types)
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
@@ -7404,12 +7968,14 @@ def add_test(
                     f_args_tensor = (self_tensor,) + args_tensor
 
                     if not is_inplace and test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(fn), fn, f_args_variable, kwargs_variable)
+                        check_against_reference(self, create_traced_fn(self, fn), fn,
+                                                f_args_variable, kwargs_variable, check_types=check_types)
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-                                                create_script_fn(name, 'functional', output_process_fn),
-                                                fn, f_args_variable, kwargs_variable)
+                                                create_script_fn(self, name, 'functional', output_process_fn),
+                                                fn, f_args_variable, kwargs_variable,
+                                                check_types=check_types)
 
             check(name)
             inplace_name = name + '_'
@@ -7446,7 +8012,7 @@ def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x
 
         if test_name not in EXCLUDE_SCRIPT:
             check_against_reference(self,
-                                    create_script_fn(name, 'nn_functional', output_process_fn),
+                                    create_script_fn(self, name, 'nn_functional', output_process_fn),
                                     fn, f_args_variable, kwargs_variable)
 
     post_add_test(test_name, skipTestIf, do_test)
