@@ -10,6 +10,7 @@
 #include <ATen/core/Error.h>
 #include <ATen/core/UniqueVoidPtr.h>
 #include <ATen/core/typeid.h>
+#include <ATen/core/ATenGeneral.h>
 
 namespace caffe2 {
 class Event;
@@ -24,7 +25,7 @@ class BaseContext;
    functions that are invoked statically before in Tensor class, e.g. New,
    We will merge this with Allocator later.
  */
-class AT_CORE_API BaseStaticContext {
+class CAFFE2_API BaseStaticContext {
  public:
   virtual ~BaseStaticContext() noexcept {}
 
@@ -54,7 +55,7 @@ class AT_CORE_API BaseStaticContext {
  * functions in the BaseContext class.
  * TODO: add docs after this is finalized.
  */
-class AT_CORE_API BaseContext {
+class CAFFE2_API BaseContext {
  public:
   virtual ~BaseContext() noexcept {}
 
@@ -184,3 +185,27 @@ class AT_CORE_API BaseContext {
 };
 
 } // namespace at
+
+namespace caffe2 {
+
+using at::BaseContext;
+using at::BaseStaticContext;
+
+using StaticContextMap = std::unordered_map<at::DeviceType, BaseStaticContext*>;
+CAFFE2_API StaticContextMap& GetStaticContexts();
+CAFFE2_API void set_static_context(at::DeviceType t, BaseStaticContext* ptr);
+CAFFE2_API BaseStaticContext* get_static_context(at::DeviceType t);
+
+template <at::DeviceType t>
+struct StaticContextFunctionRegisterer {
+  explicit StaticContextFunctionRegisterer(BaseStaticContext* ptr) {
+    set_static_context(t, ptr);
+  }
+};
+
+#define REGISTER_STATIC_CONTEXT(t, f)                                \
+  namespace {                                                        \
+  static StaticContextFunctionRegisterer<t> g_static_context_##d(f); \
+  }
+
+} // namespace caffe2
