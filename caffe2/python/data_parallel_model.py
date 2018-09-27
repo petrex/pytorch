@@ -137,7 +137,7 @@ def Parallelize(
 
     if devices is None:
         if not cpu_device:
-            devices = list(range(0, workspace.NumCudaDevices()))
+            devices = list(range(0, workspace.NumGpuDevices()))
         else:
             devices = list(range(0, cpu_count()))
 
