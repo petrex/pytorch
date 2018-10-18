@@ -47,6 +47,14 @@ log.setLevel(logging.DEBUG)
 dyndep.InitOpsLibrary('@/caffe2/caffe2/distributed:file_store_handler_ops')
 dyndep.InitOpsLibrary('@/caffe2/caffe2/distributed:redis_store_handler_ops')
 
+def hipify_dc(dc):
+    if dc.device_type == caffe2_pb2.CUDA:
+        dc.device_type = caffe2_pb2.HIP
+
+def hipify_net(net):
+    hipify_dc(net.device_option)
+    for op in net.op:
+        hipify_dc(op.device_option)
 
 def AddImageInput(
     model,
@@ -490,6 +498,8 @@ def Train(args):
 
     data_parallel_model.OptimizeGradientMemory(train_model, {}, set(), False)
 
+    hipify_net(train_model.param_init_net.Proto())
+    hipify_net(train_model.net.Proto())
     workspace.RunNetOnce(train_model.param_init_net)
     workspace.CreateNet(train_model.net)
 
@@ -541,6 +551,8 @@ def Train(args):
             devices=gpus,
             cpu_device=args.use_cpu,
         )
+        hipify_net(train_model.param_init_net.Proto())
+        hipify_net(train_model.net.Proto())
         workspace.RunNetOnce(test_model.param_init_net)
         workspace.CreateNet(test_model.net)
 
