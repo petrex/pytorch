@@ -51,7 +51,6 @@ def hipify_net(net):
     def hipify_dc(dc):
         if dc.device_type == caffe2_pb2.CUDA:
             dc.device_type = caffe2_pb2.HIP
-            dc.hip_gpu_id = dc.cuda_gpu_id
     hipify_dc(net.device_option)
     for op in net.op:
         hipify_dc(op.device_option)
