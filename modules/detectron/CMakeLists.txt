@@ -1,7 +1,7 @@
 file(GLOB Detectron_CPU_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/*.cc)
 file(GLOB Detectron_GPU_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/*.cu)
 
-file(GLOB_RECURSE tmp *_hip.cc)
+file(GLOB_RECURSE tmp *.hip)
 set(Detectron_HIP_SRCS ${Detectron_HIP_SRCS} ${tmp})
 
 if (BUILD_CAFFE2_OPS)
