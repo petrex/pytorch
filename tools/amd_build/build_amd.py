@@ -37,6 +37,7 @@ includes = [
     "caffe2/db/*",
     "caffe2/utils/*",
     "c10/cuda/*",
++   "modules/detectron/*",
     # PyTorch paths
     # Keep this synchronized with is_pytorch_file in hipify_python.py
     "aten/src/ATen/cuda/*",

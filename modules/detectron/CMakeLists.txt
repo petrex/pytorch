@@ -1,6 +1,9 @@
 file(GLOB Detectron_CPU_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/*.cc)
 file(GLOB Detectron_GPU_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/*.cu)
 
+file(GLOB_RECURSE tmp *_hip.cc)
+set(Detectron_HIP_SRCS ${Detectron_HIP_SRCS} ${tmp})
+
 if (BUILD_CAFFE2_OPS)
   #cmake only check for separate OpenMP library on AppleClang 7+
   #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
@@ -25,5 +28,14 @@ if (BUILD_CAFFE2_OPS)
     add_library(caffe2_detectron_ops SHARED ${Detectron_CPU_SRCS})
     target_link_libraries(caffe2_detectron_ops caffe2 ${OpenMP_link})
     install(TARGETS caffe2_detectron_ops DESTINATION lib)
+  endif()
+
+  if(USE_ROCM)
+    HIP_ADD_LIBRARY(
+        caffe2_detectron_ops_hip SHARED
+        ${Detectron_HIP_SRCS})
+
+    target_link_libraries(caffe2_detectron_ops_hip caffe2_hip)
+    install(TARGETS caffe2_detectron_ops_hip DESTINATION lib)
   endif()
 endif()
