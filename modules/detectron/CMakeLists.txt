@@ -34,7 +34,7 @@ if (BUILD_CAFFE2_OPS)
     HIP_ADD_LIBRARY(
         caffe2_detectron_ops_hip SHARED
         ${Detectron_HIP_SRCS})
-
+    set_source_files_properties(${Detectron_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
     target_link_libraries(caffe2_detectron_ops_hip caffe2_hip)
     install(TARGETS caffe2_detectron_ops_hip DESTINATION lib)
   endif()
