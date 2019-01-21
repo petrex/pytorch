@@ -4,6 +4,7 @@
 
 #include "caffe2/core/hip/common_miopen.h"
 #include "caffe2/core/hip/context_gpu.h"
+#include "miopen/version.h"
 
 namespace caffe2 {
 

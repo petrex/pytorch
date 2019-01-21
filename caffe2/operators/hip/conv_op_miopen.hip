@@ -19,6 +19,11 @@
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 
+inline bool miopenLegacyDef()
+{
+    return (MIOPEN_VERSION_MAJOR == 1) && (MIOPEN_VERSION_MINOR <8);
+}
+
 namespace caffe2 {
 
 // Earlier in the days Caffe sets the default miopen workspace to 8MB. We bump
@@ -47,17 +52,15 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_for_bias_));
     MIOPEN_ENFORCE(miopenCreateConvolutionDescriptor(&conv_desc_));
 
-    if(group_ > 1) {
-        mode_ = miopenGroupConv;
-    } else {
+    if(miopenLegacyDef())
+    {
+        mode_ = (group_ > 1) ? miopenGroupConv : miopenConvolution;
+    }
+    else
+    {
         mode_ = miopenConvolution;
     }
 
-    if (mode_ == miopenGroupConv) {
-      OPERATOR_NEEDS_FEATURE(
-          dilation_h() == 1 && dilation_w() == 1,
-          "MIOpen convolution does not support dilation for groups > 1.");
-    }
   }
 
   ~MIOPENConvOpBase() {
