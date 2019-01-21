@@ -21,7 +21,7 @@
 
 inline bool miopenLegacyDef()
 {
-    return (MIOPEN_VERSION_MAJOR == 1) && (MIOPEN_VERSION_MINOR <8);
+    return (MIOPEN_VERSION_MAJOR == 1) && (MIOPEN_VERSION_MINOR <= 7);
 }
 
 namespace caffe2 {
