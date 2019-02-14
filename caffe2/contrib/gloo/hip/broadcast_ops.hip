@@ -1,6 +1,6 @@
 #include "caffe2/contrib/gloo/broadcast_ops.h"
 
-#include "caffe2/core/hip/context_hip.h"
+#include "caffe2/core/hip/context_gpu.hip"
 
 #include "hip_broadcast_one_to_all.h"
 

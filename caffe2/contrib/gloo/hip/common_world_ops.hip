@@ -1,5 +1,5 @@
 #include "caffe2/contrib/gloo/common_world_ops.h"
-#include "caffe2/core/hip/context_hip.h"
+#include "caffe2/core/hip/context_gpu.hip"
 #include "hip.h"
 #include <gloo/transport/tcp/device.h>
 

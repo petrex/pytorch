@@ -1,6 +1,6 @@
 #include "caffe2/contrib/gloo/allreduce_ops.h"
 
-#include "caffe2/core/hip/context_hip.h"
+#include "caffe2/core/hip/context_gpu.hip"
 #include "caffe2/core/logging.h"
 
 #include "hip_allreduce_bcube.h"
