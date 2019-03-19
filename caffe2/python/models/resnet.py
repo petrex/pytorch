@@ -158,12 +158,16 @@ class ResNetBuilder():
                     is_test=self.is_test,
                 )
 
-        self.prev_blob = brew.sum(
+#        self.prev_blob = brew.sum(
+#            self.model, [shortcut_blob, last_conv],
+#            'comp_%d_sum_%d' % (self.comp_count, self.comp_idx)
+
+        self.prev_blob = brew.sumRelu(
             self.model, [shortcut_blob, last_conv],
-            'comp_%d_sum_%d' % (self.comp_count, self.comp_idx)
+            'comp_%d_sumRelu_%d' % (self.comp_count, self.comp_idx)
         )
         self.comp_idx += 1
-        self.add_relu()
+        #self.add_relu()
 
         # Keep track of number of high level components if this ResNetBuilder
         self.comp_count += 1
