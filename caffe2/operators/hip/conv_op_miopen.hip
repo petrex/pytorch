@@ -88,7 +88,7 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
   const float alpha_;
   const float beta_;
 };
-
+template <bool DepthWise = false>
 class MIOPENConvOp final : public MIOPENConvOpBase {
  public:
   MIOPENConvOp(const OperatorDef& operator_def, Workspace* ws)
@@ -132,6 +132,7 @@ class MIOPENConvOp final : public MIOPENConvOpBase {
   INPUT_TAGS(INPUT, FILTER, BIAS);
 };
 
+template <bool DepthWise = false>
 class MIOPENConvGradientOp final : public MIOPENConvOpBase {
  public:
   MIOPENConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
@@ -205,6 +206,7 @@ class MIOPENConvGradientOp final : public MIOPENConvOpBase {
 
 template <typename T_X, typename T_W, typename T_B, typename MATH, typename T_Y>
 bool MIOPENConvOp::DoRunWithType() {
+  mode_ = (DepthWise)? miopenDepthwise : mode_;
   auto& X = Input(INPUT);
   auto& Weight = Input(FILTER);
 
@@ -401,6 +403,7 @@ template <
     typename T_DW,
     typename T_DB>
 bool MIOPENConvGradientOp::DoRunWithType() {
+  mode_ = (DepthWise)? miopenDepthwise : mode_;
   auto& X = Input(INPUT);
   auto& Weight = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
