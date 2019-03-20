@@ -206,7 +206,7 @@ class MIOPENConvGradientOp final : public MIOPENConvOpBase {
 
 template <bool DepthWise>
 template <typename T_X, typename T_W, typename T_B, typename MATH, typename T_Y>
-bool MIOPENConvOp::DoRunWithType() {
+bool DoRunWithType() {
   mode_ = (DepthWise)? miopenDepthwise : mode_;
   auto& X = Input(INPUT);
   auto& Weight = Input(FILTER);
@@ -404,7 +404,7 @@ template <
     typename T_DX,
     typename T_DW,
     typename T_DB>
-bool MIOPENConvGradientOp::DoRunWithType() {
+bool DoRunWithType() {
   mode_ = (DepthWise)? miopenDepthwise : mode_;
   auto& X = Input(INPUT);
   auto& Weight = Input(FILTER);
