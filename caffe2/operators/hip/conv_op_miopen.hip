@@ -204,6 +204,7 @@ class MIOPENConvGradientOp final : public MIOPENConvOpBase {
 // Implementations
 ////////////////////////////////////////////////////////////////////////////////
 
+template <bool DepthWise>
 template <typename T_X, typename T_W, typename T_B, typename MATH, typename T_Y>
 bool MIOPENConvOp::DoRunWithType() {
   mode_ = (DepthWise)? miopenDepthwise : mode_;
@@ -393,6 +394,7 @@ bool MIOPENConvOp::RunOnDevice() {
   return true;
 }
 
+template <bool DepthWise>
 template <
     typename T_X,
     typename T_DY,
