@@ -180,7 +180,7 @@ bool MIOpenSpatialBNActivateOp::DoRunWithType() {
   MIOPEN_ENFORCE(miopenCreateFusionPlan(&fusePlanDesc, miopenVerticalFusion, data_desc_));
 
   // Create and add operators
-  MIOPEN_ENFORCE(miopenCreateOpBatchNormInference(fusePlanDesc, &batchnorm_op, miopenBNSpatial, bn_param_desc_);
+  MIOPEN_ENFORCE(miopenCreateOpBatchNormInference(fusePlanDesc, &batchnorm_op, miopenBNSpatial, bn_param_desc_));
   MIOPEN_ENFORCE(miopenCreateOpActivationForward(fusePlanDesc, &activ_op, miopenActivationRELU));
 
   // Compile the Fusion Plan
