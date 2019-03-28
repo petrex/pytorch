@@ -370,6 +370,6 @@ bool MIOpenSpatialBNActivateGradientOp::RunOnDevice() {
   return true;
 }
 
-REGISTER_MIOPEN_OPERATOR(SpatialBN, MIOpenSpatialBNActivateOp);
-REGISTER_MIOPEN_OPERATOR(SpatialBNGradient, MIOpenSpatialBNActivateGradientOp);
+REGISTER_MIOPEN_OPERATOR(SpatialBNA, MIOpenSpatialBNActivateOp);
+REGISTER_MIOPEN_OPERATOR(SpatialBNAGradient, MIOpenSpatialBNActivateGradientOp);
 } // namespace caffe2
