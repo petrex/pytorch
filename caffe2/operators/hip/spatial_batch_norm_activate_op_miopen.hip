@@ -25,15 +25,19 @@ const double MIOPEN_BN_MIN_EPSILON = 1e-6;
 
 namespace caffe2 {
 
-class MIOpenSpatialBNOp final : public SpatialBNOp<HIPContext> {
+class MIOpenSpatialBNActivateOp final : public SpatialBNOp<HIPContext> {
  public:
   USE_OPERATOR_FUNCTIONS(HIPContext);
-  MIOpenSpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
+  MIOpenSpatialBNActivateOp(const OperatorDef& operator_def, Workspace* ws)
       : SpatialBNOp<HIPContext>(operator_def, ws),
         miopen_wrapper_(&context_),
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
-        mode_(miopenBNSpatial) {
+        batchnorm_op(nullptr),
+        activ_op(nullptr),
+        fusePlanDesc(nullptr),
+        mode_(miopenBNSpatial),
+        activ_mode_(miopenActivationRELU) {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&bn_param_desc_));
     if (epsilon_ <= MIOPEN_BN_MIN_EPSILON) {
@@ -44,7 +48,7 @@ class MIOpenSpatialBNOp final : public SpatialBNOp<HIPContext> {
     epsilon_ = std::max(epsilon_, MIOPEN_BN_MIN_EPSILON);
   }
 
-  ~MIOpenSpatialBNOp() {
+  ~MIOpenSpatialBNActivateOp() {
     MIOPEN_ENFORCE(miopenDestroyTensorDescriptor(data_desc_));
     MIOPEN_ENFORCE(miopenDestroyTensorDescriptor(bn_param_desc_));
   }
@@ -60,18 +64,26 @@ class MIOpenSpatialBNOp final : public SpatialBNOp<HIPContext> {
   vector<int64_t> miopen_input_dims_;
   float alpha_;
   float beta_;
+  miopenFusionOpDescriptor_t batchnorm_op;
+  miopenFusionOpDescriptor_t activ_op;
+  miopenFusionPlanDescriptor_t fusePlanDesc;
   miopenBatchNormMode_t mode_;
+  miopenActivationMode_t activ_mode_;
 };
 
-class MIOpenSpatialBNGradientOp final : public SpatialBNGradientOp<HIPContext> {
+class MIOpenSpatialBNActivateGradientOp final : public SpatialBNGradientOp<HIPContext> {
  public:
   USE_OPERATOR_FUNCTIONS(HIPContext);
-  MIOpenSpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  MIOpenSpatialBNActivateGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : SpatialBNGradientOp<HIPContext>(operator_def, ws),
         miopen_wrapper_(&context_),
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
-        mode_(miopenBNSpatial) {
+        batchnorm_op(nullptr),
+        activ_op(nullptr),
+        fusePlanDesc(nullptr),
+        mode_(miopenBNSpatial),
+        activ_mode_(miopenActivationRELU) {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&bn_param_desc_));
     if (epsilon_ <= MIOPEN_BN_MIN_EPSILON) {
@@ -82,7 +94,7 @@ class MIOpenSpatialBNGradientOp final : public SpatialBNGradientOp<HIPContext> {
     epsilon_ = std::max(epsilon_, MIOPEN_BN_MIN_EPSILON);
   }
 
-  ~MIOpenSpatialBNGradientOp() {
+  ~MIOpenSpatialBNActivateGradientOp() {
     MIOPEN_ENFORCE(miopenDestroyTensorDescriptor(data_desc_));
     MIOPEN_ENFORCE(miopenDestroyTensorDescriptor(bn_param_desc_));
   }
@@ -99,7 +111,11 @@ class MIOpenSpatialBNGradientOp final : public SpatialBNGradientOp<HIPContext> {
   vector<int64_t> miopen_input_dims_;
   float alpha_;
   float beta_;
+  miopenFusionOpDescriptor_t batchnorm_op;
+  miopenFusionOpDescriptor_t activ_op;
+  miopenFusionPlanDescriptor_t fusePlanDesc;
   miopenBatchNormMode_t mode_;
+  miopenActivationMode_t activ_mode_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -107,8 +123,7 @@ class MIOpenSpatialBNGradientOp final : public SpatialBNGradientOp<HIPContext> {
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename T, typename M>
-bool MIOpenSpatialBNOp::DoRunWithType() {
-  // QoL
+bool MIOpenSpatialBNActivateOp::DoRunWithType() {
   typedef typename miopenTypeWrapper<T>::BNParamType BNParamType;
 
   auto& X = Input(INPUT);
@@ -159,22 +174,31 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
     if (N == 0) {
       return true;
     }
-    MIOPEN_ENFORCE(miopenBatchNormalizationForwardInference(
-        miopen_wrapper_.inline_miopen_handle(),
-        // Note: PERSISTENT not implemented for inference
-        mode_,
-        &alpha_,
-        &beta_,
+    
+  // Creat a Fusion plan
+  // TODO add cached fusion plan
+  MIOPEN_ENFORCE(miopenCreateFusionPlan(&fusePlanDesc, miopenVerticalFusion, data_desc_));
+
+  // Create and add operators
+  MIOPEN_ENFORCE(miopenCreateOpBatchNormInference(fusePlanDesc, &batchnorm_op, miopenBNSpatial, bn_param_desc_);
+  MIOPEN_ENFORCE(miopenCreateOpActivationForward(fusePlanDesc, &activ_op, miopenActivationRELU));
+
+  // Compile the Fusion Plan
+  MIOPEN_ENFORCE(miopenCompileFusionPlan(miopen_wrapper_.inline_miopen_handle(), fusePlanDesc));
+  
+  MIOPEN_ENFORCE(miopenSetOpArgsActivForward(fusionArgs, activ_op, &alpha_, &beta_, activ_op.alpha_, activ_op.beta_ , activ_op.gamma_));
+  MIOPEN_ENFORCE(miopenSetOpArgsBatchNormInference(fusionArgs, batchnorm_op, &alpha_, &beta_, batchnorm_op.bnScale_, batchnorm_op.bnBias_ , batchnorm_op.bnMean_, batchnorm_op.bnVariance_, batchnorm_op.bnEpsilon_));
+  
+  // Execute a Fusion Plan
+  MIOPEN_ENFORCE(miopenExecuteFusionPlan(
+        state->miopen_handle(),
+        fusePlanDesc,
         data_desc_,
-        X.template data<T>(),
-        data_desc_,
-        Y_data,
+        X.template data<T_X>(),
         bn_param_desc_,
-        const_cast<float*>(scale.template data<BNParamType>()),
-        const_cast<float*>(bias.template data<BNParamType>()),
-        const_cast<float*>(est_mean.template data<BNParamType>()),
-        const_cast<float*>(est_var.template data<BNParamType>()),
-        epsilon_));
+        Y.template data<T_Y>(),
+        fusionArgs));
+
   } else {
     // Run training mode.
     // obtain running mean and running inv var, and see if we need to
@@ -245,7 +269,7 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   }
   return true;
 }
-bool MIOpenSpatialBNOp::RunOnDevice() {
+bool MIOpenSpatialBNActivateOp::RunOnDevice() {
   // Fall back to HIP for multi batch spatial BNorm and NHWC layout
   if (num_batches_ > 1 || order_ == StorageOrder::NHWC) {
     return SpatialBNOp<HIPContext>::RunOnDevice();
@@ -261,7 +285,7 @@ bool MIOpenSpatialBNOp::RunOnDevice() {
 }
 
 template <typename T, typename M>
-bool MIOpenSpatialBNGradientOp::DoRunWithType() {
+bool MIOpenSpatialBNActivateGradientOp::DoRunWithType() {
   typedef typename miopenTypeWrapper<T>::BNParamType BNParamType;
 
   auto& X = Input(INPUT);
@@ -331,7 +355,7 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
       saved_var_data));
   return true;
 }
-bool MIOpenSpatialBNGradientOp::RunOnDevice() {
+bool MIOpenSpatialBNActivateGradientOp::RunOnDevice() {
   // Fall back to HIP for multi batch spatial BNorm and NHWC layout
   if (num_batches_ > 1 || order_ == StorageOrder::NHWC) {
     return SpatialBNGradientOp<HIPContext>::RunOnDevice();
@@ -346,6 +370,6 @@ bool MIOpenSpatialBNGradientOp::RunOnDevice() {
   return true;
 }
 
-REGISTER_MIOPEN_OPERATOR(SpatialBN, MIOpenSpatialBNOp);
-REGISTER_MIOPEN_OPERATOR(SpatialBNGradient, MIOpenSpatialBNGradientOp);
+REGISTER_MIOPEN_OPERATOR(SpatialBN, MIOpenSpatialBNActivateOp);
+REGISTER_MIOPEN_OPERATOR(SpatialBNGradient, MIOpenSpatialBNActivateGradientOp);
 } // namespace caffe2
