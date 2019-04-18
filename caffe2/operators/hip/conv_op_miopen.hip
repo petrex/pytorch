@@ -48,18 +48,6 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_));
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_for_bias_));
     MIOPEN_ENFORCE(miopenCreateConvolutionDescriptor(&conv_desc_));
-
-    if (group_ > 1) {
-      mode_ = miopenGroupConv;
-    } else {
-      mode_ = miopenConvolution;
-    }
-
-    if (mode_ == miopenGroupConv) {
-      OPERATOR_NEEDS_FEATURE(
-          dilation_h() == 1 && dilation_w() == 1,
-          "MIOpen convolution does not support dilation for groups > 1.");
-    }
   }
 
   ~MIOPENConvOpBase() {
@@ -81,7 +69,6 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
   miopenTensorDescriptor_t top_desc_;
   miopenTensorDescriptor_t top_desc_for_bias_;
   miopenConvolutionDescriptor_t conv_desc_;
-  miopenConvolutionMode_t mode_;
   size_t miopen_state_;
   const size_t miopen_ws_nbytes_limit_;
   bool exhaustive_search_;
@@ -101,7 +88,11 @@ class MIOPENConvOp final : public MIOPENConvOpBase {
             OperatorBase::GetSingleArgument<bool>("bestAlgoFound_", false)),
         fwdConvWs_(nullptr),
         fwdConvWsSize_(0),
-        fwdAlgo_(miopenConvolutionFwdAlgoGEMM) {}
+        mode_(miopenConvolution),
+        fwdAlgo_(miopenConvolutionFwdAlgoGEMM) {
+
+          mode_ = (group_ > 1)? miopenGroupConv : mode_;
+  }
 
   ~MIOPENConvOp() {
     if (fwdConvWs_) {
@@ -129,6 +120,7 @@ class MIOPENConvOp final : public MIOPENConvOpBase {
   miopenConvFwdAlgorithm_t fwdAlgo_;
   // Input: X, W, b
   // Output: Y
+  miopenConvolutionMode_t mode_;
   INPUT_TAGS(INPUT, FILTER, BIAS);
 };
 
@@ -147,6 +139,7 @@ class MIOPENConvGradientOp final : public MIOPENConvOpBase {
             OperatorBase::GetSingleArgument<bool>("bestAlgoFound", false)),
         bwdWeiAlgo_(miopenConvolutionBwdWeightsAlgoGEMM),
         bwdDataAlgo_(miopenConvolutionBwdDataAlgoGEMM),
+        mode_(miopenConvolution),
         bwdWeightWsSize_(0),
         bwdDataWsSize_(0),
         bwdWeightWs_(nullptr),
@@ -154,6 +147,8 @@ class MIOPENConvGradientOp final : public MIOPENConvOpBase {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
+
+      mode_ = (group_ > 1)? miopenGroupConv : mode_;
   }
 
   ~MIOPENConvGradientOp() {
@@ -195,6 +190,7 @@ class MIOPENConvGradientOp final : public MIOPENConvOpBase {
   char* bwdDataWs_;
   // input: X, W, dY
   // output: dW, db, and optionally dX
+  miopenConvolutionMode_t mode_;
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
   OUTPUT_TAGS(FILTER_GRAD, BIAS_OR_INPUT_GRAD, INPUT_GRAD);
 };
