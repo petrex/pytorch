@@ -92,7 +92,7 @@ class MIOPENConvOp final : public MIOPENConvOpBase {
         mode_(miopenConvolution),
         fwdAlgo_(miopenConvolutionFwdAlgoGEMM) {
 
-          mode_ = (Depthwise) ? miopenDepthwise : mode_;
+          mode_ = (DepthWise) ? miopenDepthwise : mode_;
           mode_ = (group_ > 1)? miopenGroupConv : mode_;
   }
 
@@ -151,7 +151,7 @@ class MIOPENConvGradientOp final : public MIOPENConvOpBase {
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
 
-      mode_ = (Depthwise) ? miopenDepthwise : mode_;
+      mode_ = (DepthWise) ? miopenDepthwise : mode_;
       mode_ = (group_ > 1)? miopenGroupConv : mode_;
   }
 
