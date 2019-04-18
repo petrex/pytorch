@@ -76,6 +76,7 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
   const float beta_;
 };
 
+template <bool DepthWise = false>
 class MIOPENConvOp final : public MIOPENConvOpBase {
  public:
   MIOPENConvOp(const OperatorDef& operator_def, Workspace* ws)
@@ -91,6 +92,7 @@ class MIOPENConvOp final : public MIOPENConvOpBase {
         mode_(miopenConvolution),
         fwdAlgo_(miopenConvolutionFwdAlgoGEMM) {
 
+          mode_ = (Depthwise) ? miopenDepthwise : mode_;
           mode_ = (group_ > 1)? miopenGroupConv : mode_;
   }
 
@@ -124,6 +126,7 @@ class MIOPENConvOp final : public MIOPENConvOpBase {
   INPUT_TAGS(INPUT, FILTER, BIAS);
 };
 
+template <bool DepthWise = false>
 class MIOPENConvGradientOp final : public MIOPENConvOpBase {
  public:
   MIOPENConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
@@ -148,6 +151,7 @@ class MIOPENConvGradientOp final : public MIOPENConvOpBase {
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
 
+      mode_ = (Depthwise) ? miopenDepthwise : mode_;
       mode_ = (group_ > 1)? miopenGroupConv : mode_;
   }
 
@@ -664,6 +668,9 @@ bool MIOPENConvGradientOp::RunOnDevice() {
   return true;
 }
 
-REGISTER_MIOPEN_OPERATOR(Conv, MIOPENConvOp);
-REGISTER_MIOPEN_OPERATOR(ConvGradient, MIOPENConvGradientOp);
+REGISTER_MIOPEN_OPERATOR(Conv, MIOPENConvOp<false>);
+REGISTER_MIOPEN_OPERATOR(ConvGradient, MIOPENConvGradientOp<false>);
+
+REGISTER_MIOPEN_OPERATOR(DepthWiseConv, MIOPENConvOp<true>);
+REGISTER_MIOPEN_OPERATOR(DepthWiseConvGradient, MIOPENConvGradientOp<true>);
 } // namespace caffe2
