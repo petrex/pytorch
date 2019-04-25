@@ -672,14 +672,15 @@ def main():
                         help="Transport to use for distributed run [tcp|ibverbs]")
     parser.add_argument("--distributed_interfaces", type=str, default="",
                         help="Network interfaces to use for distributed run")
-
     parser.add_argument("--first_iter_timeout", type=int, default=600,
                         help="Timeout (secs) of the first iteration "
                         "(default: %(default)s)")
     parser.add_argument("--timeout", type=int, default=60,
                         help="Timeout (secs) of each (except the first) iteration "
                         "(default: %(default)s)")
-
+    parser.add_argument("--loss_scale", type=float, default=256.0,
+                        help="Loss Scale for mixed precision training "
+                        "(default: %(default)s)")
     args = parser.parse_args()
 
     Train(args)

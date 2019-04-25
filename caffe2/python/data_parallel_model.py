@@ -27,6 +27,7 @@ log.setLevel(logging.INFO)
 
 _DEFAULT_TIMEOUT_SEC = 30
 _DEFAULT_BARRIER_NET_TIMEOUT_SEC = 300
+_DEFAULT_FP16_SCALING = 256.0
 
 
 def Parallelize_GPU(*args, **kwargs):
@@ -198,7 +199,7 @@ def Parallelize(
 
     losses_by_gpu = {}
     num_shards = 1 if rendezvous is None else rendezvous['num_shards']
-    loss_scale = 1.0 / (len(devices) * num_shards)
+    loss_scale = _DEFAULT_FP16_SCALING / (len(devices) * num_shards)
 
     has_parameter_updates = param_update_builder_fun is not None or \
         optimizer_builder_fun is not None
@@ -291,7 +292,7 @@ def Parallelize(
     param_to_grad = model_helper_obj.param_to_grad
     grads_ordered = [param_to_grad[p] for p in
                      model_helper_obj.params if p in param_to_grad]
-    non_datapar_grads = [param_to_grad[p] for p in non_datapar_params]
+    non_datapar_grads = [param_to_grad[p]/_DEFAULT_FP16_SCALING for p in non_datapar_params]
 
     gradients_grouped = _GroupByDevice(
         model_helper_obj,
