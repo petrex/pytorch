@@ -8,7 +8,7 @@ from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-from hypothesis import given, assume
+from hypothesis import given, assume, settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
@@ -139,6 +139,8 @@ class TestMomentumSGD(serial.SerializedTestCase):
             [grad, m, lr, w, indices],
             sparse)
 
+    #ROCm's new compiler loads code objects lazily, which needs more time when it launch the first kernel.
+    @settings(deadline=1000 if gc.device_type == caffe2_pb2.HIP)
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
     def test_fp16momentum_sgd(self, n, nesterov, gc, dc):
