@@ -22,6 +22,7 @@ from torch.sparse._semi_structured_conversions import (
 
 from torch.testing import make_tensor
 
+from torch.testing._internal.common_cuda import GFX942_Exact
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -42,14 +43,17 @@ from torch.testing._internal.common_utils import (
 import pytest
 
 from torch.utils._triton import has_triton
+import torch.version
 
 SEMI_STRUCTURED_SUPPORTED_DTYPES = [torch.float16, torch.bfloat16, torch.float32, torch.int8]
 SEMI_STRUCTURED_SUPPORTED_BACKENDS = {}
 
 _IS_SM8X = False
+_IS_MI300x = False
 
 if torch.cuda.is_available():
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
+    _IS_MI300x = torch.version.hip and GFX942_Exact
     SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = SparseSemiStructuredTensorCUTLASS
 
     # check if cslt is available for now using this:
@@ -562,8 +566,8 @@ def create_random_mask(shape) -> torch.Tensor:
 class TestSparseSemiStructuredTraining(TestCase):
 
     def setUp(self):
-        if not _IS_SM8X:
-            self.skipTest('Only runs on SM80')
+        if not _IS_SM8X and not _IS_MI300x:
+            self.skipTest('Only runs on SM80/MI300x')
         if IS_WINDOWS:
             self.skipTest('CUTLASS not supported on windows')
 
@@ -1034,8 +1038,8 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch._cslt_sparse_mm
     """
     def setUp(self):
-        if not _IS_SM8X:
-            self.skipTest('Only runs on SM80')
+        if not _IS_SM8X and not _IS_MI300x:
+            self.skipTest('Only runs on SM80/MI300x')
         if "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest('cuSPARSELt not enabled')
 
