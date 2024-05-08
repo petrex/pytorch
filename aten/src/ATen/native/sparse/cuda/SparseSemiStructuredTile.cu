@@ -17,7 +17,7 @@
 
 namespace at::native {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(_MSC_VER) || (!defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 11080)
 #else
 struct MetadataCuSparseLt {
   // Format used by cuSparseLt
@@ -110,6 +110,7 @@ struct MetadataCuSparseLt {
   }
 };
 
+#ifndef USE_ROCM
 struct MetadataCutlass {
   // Layout needed to run 2:4 gemms in CUTLASS
   // There is basically a hardware specific value for every
@@ -191,6 +192,7 @@ struct MetadataCutlass {
                _meta_trans_reordered_sx);
   }
 };
+#endif
 
 template <typename KT, typename Metadata, typename Algorithm>
 __global__ void __launch_bounds__(32 /* num_threads */, 20)
