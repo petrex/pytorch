@@ -133,6 +133,19 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         compressed_tensor.data_ptr(),
         compressedBufferPtr.get(),
         stream));
+    //print the result after compression
+    #ifdef USE_ROCM
+    hipstreamsynchronize(stream);
+    //define a host tensor to copy the compressed tensor to host
+    auto compressed_tensor_host = at::empty({compressed_tensor.numel()}, compressed_tensor.options().device(at::kCPU));
+    //copy compressed tensor to host
+    TORCH_CHECK(hipMemcpy(compressed_tensor_host, compressed_tensor.data_ptr(), compressed_tensor.numel() * compressed_tensor.element_size(), hipMemcpyDeviceToHost) == hipSuccess, "Failed to copy compressed tensor to host.");
+ //print the compressed_tensor_host values
+    for (int i = 0; i < compressed_tensor_host.numel(); i++)
+    {
+        std::cout << compressed_tensor_host[i].item().to<int>() << std::endl;
+    }
+    #endif
 
     return compressed_tensor;
 }
