@@ -810,6 +810,13 @@ Tensor _sparse_semi_structured_addmm(
 namespace at::native {
 
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+template <typename Element, typename LayoutDest, typename LayoutSrc>
+static void reorder_meta(ck::Tensor<Element, LayoutDest> dest,
+                         ck::Tensor<Element, LayoutSrc> src,
+                         const int problem_size_m, const int problem_size_k) {
+  AT_ERROR(__func__, " : CUTLASS not supported");
+}
+
 #else
 // Copied from tools/util/include/host_reorder.h, from CUTLASS source
 // tree.  This is for simplicity - namely, this file is not under
