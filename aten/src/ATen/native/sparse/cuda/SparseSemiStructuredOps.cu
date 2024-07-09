@@ -808,7 +808,7 @@ Tensor _sparse_semi_structured_addmm(
 
 // Following is just for testing purposes.
 namespace at::native {
-
+//TODO : Remove this function after testing, use hip to cuda mapping
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
 template <typename Element, typename LayoutDest, typename LayoutSrc>
 static void reorder_meta(ck::Tensor<Element, LayoutDest> dest,
