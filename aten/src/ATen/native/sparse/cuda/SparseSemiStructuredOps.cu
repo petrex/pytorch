@@ -814,7 +814,30 @@ template <typename Element, typename LayoutDest, typename LayoutSrc>
 static void reorder_meta(ck::Tensor<Element, LayoutDest> dest,
                          ck::Tensor<Element, LayoutSrc> src,
                          const int problem_size_m, const int problem_size_k) {
-  AT_ERROR(__func__, " : CUTLASS not supported");
+#ifndef USE_ROCM
+  AT_ERROR(__func__, " : CK not supported");
+#endif
+  for (int m = 0; m < problem_size_m; m++) {
+    for (int k = 0; k < problem_size_k; k++) {
+      // First reorder the rows.
+      int group = (sizeof(Element) == 2) ? 32 : 16;
+      int interweave = (sizeof(Element) == 2) ? 4 : 2;
+
+      int dest_row = m / group * group + (m % 8) * interweave + (m % group) / 8;
+      int dest_col = k;
+
+      // Next swizzle the 2x2 blocks from Z to N.
+      if (((dest_row % 2) == 0) && ((dest_col % 2) == 1)) {
+        ++dest_row;
+        --dest_col;
+      } else if (((dest_row % 2) == 1) && ((dest_col % 2) == 0)) {
+        --dest_row;
+        ++dest_col;
+      }
+
+      dest.at({dest_row, dest_col}) = src.at({m, k});
+    }
+  }
 }
 
 #else
