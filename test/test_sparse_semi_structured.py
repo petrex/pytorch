@@ -21,8 +21,7 @@ from torch.sparse._semi_structured_conversions import (
 )
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
-from torch.testing._internal.common_cuda import GFX942_Exact
+from torch.testing._internal.common_cuda import GFX942_Exact, _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -1146,10 +1145,38 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # in cuSPARSELt v0.5.0 there are only 4 alg_ids total, so we should remove the +1 here when we update.
         assert alg_id in range(CUSPARSELT_NUM_ALG_IDS + 1)
 
-instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
-instantiate_device_type_tests(TestSparseSemiStructuredCUTLASS, globals(), only_for="cuda")
-instantiate_device_type_tests(TestSparseSemiStructuredCUSPARSELT, globals(), only_for="cuda")
-instantiate_device_type_tests(TestSparseSemiStructuredTraining, globals(), only_for="cuda")
+    def test_cusparselt_backend(self):
+        version = _get_torch_cuda_version()
+        assert torch.backends.cusparselt.is_available()
+
+        # CUDA 11.8 has cuSPARSELt v0.4.0 support
+        if version == (11, 8):
+            assert torch.backends.cusparselt.version() == 400
+        # CUDA 12.1 has cuSPARSELt v0.5.2 support
+        elif version == (12, 1):
+            assert torch.backends.cusparselt.version() == 502
+        # CUDA 12.4+ has cuSPARSELt v0.6.2 support
+        elif version >= (12, 4):
+            assert torch.backends.cusparselt.version() == 602
+        else:
+            assert torch.backends.cusparselt.version() is None
+
+    @unittest.skipIf(not _IS_MI300x, "test only supported on MI300x")
+    def test_hipsparselt_backend(self):
+        assert torch.backends.cusparselt.is_available()
+        if torch.version.hip == '6.3.0':
+            assert torch.backends.cusparselt.version() >= 420
+        else:
+            # For other versions, we might want to keep the existing check or adjust accordingly
+            assert torch.backends.cusparselt.version() is not None
+
+if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
+    instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
+if "cutlass" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
+    instantiate_device_type_tests(TestSparseSemiStructuredCUTLASS, globals(), only_for="cuda")
+    instantiate_device_type_tests(TestSparseSemiStructuredTraining, globals(), only_for="cuda")
+if "cusparselt" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
+    instantiate_device_type_tests(TestSparseSemiStructuredCUSPARSELT, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
