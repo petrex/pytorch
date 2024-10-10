@@ -817,7 +817,6 @@ Tensor _sparse_semi_structured_addmm(
 
 // Following is just for testing purposes.
 namespace at::native {
-//TODO : Remove this function after testing, use hip to cuda mapping
 #if defined(USE_ROCM)
 #include <hip/hip_runtime.h>
 
@@ -935,7 +934,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
     meta_dtype = at::kInt;
     ksparse = 4;
     dense_elems_per_meta_elem = 32;
-  } else if (dense.dtype() = at::kHalf || dense.dtype() == at::kBFloat16) {
+  } else if (dense.dtype() == at::kHalf || dense.dtype() == at::kBFloat16) {
     meta_dtype = at::kShort;
     ksparse = 4;
     dense_elems_per_meta_elem = 16;
