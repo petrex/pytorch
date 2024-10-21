@@ -10,7 +10,7 @@ from torch.ao.pruning import WeightNormSparsifier
 import transformers
 
 # force CUTLASS use if cuSPARSELt is not available
-SparseSemiStructuredTensor._FORCE_CUTLASS = True
+SparseSemiStructuredTensor._FORCE_CUTLASS = False
 torch.manual_seed(100)
 
 def preprocess_validation_function(examples, tokenizer):
