@@ -15,8 +15,7 @@
 #include <mutex>
 #include <string_view>
 
-//#if AT_CUSPARSELT_ENABLED()
-#if true
+#if AT_CUSPARSELT_ENABLED()
 
 #include <cusparseLt.h>
 
