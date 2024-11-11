@@ -60,8 +60,9 @@ if torch.cuda.is_available():
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = SparseSemiStructuredTensorCUTLASS
 
     # add cuSPASRELt tests if available
-    if torch.backends.cusparselt.is_available() and (_IS_SM8X or _IS_SM9X or _IS_MI300x):
-        SEMI_STRUCTURED_SUPPORTED_BACKENDS["cusparselt"] = SparseSemiStructuredTensorCUSPARSELT
+    try:
+        if torch.backends.cusparselt.is_available() and (_IS_SM8X or _IS_SM9X or _IS_MI300x):
+            SEMI_STRUCTURED_SUPPORTED_BACKENDS["cusparselt"] = SparseSemiStructuredTensorCUSPARSELT
     except Exception:
         pass
 
