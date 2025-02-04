@@ -50,7 +50,11 @@ if TEST_SCIPY:
 def blaslt_supported_device():
     if torch.cuda.is_available():
         if torch.version.hip:
-            for arch in ['gfx90a', 'gfx94']:
+            ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
+            archs = ['gfx90a', 'gfx94']
+            if ROCM_VERSION >= (6, 3):
+                archs.extend(['gfx110', 'gfx120'])
+            for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
         else:
@@ -6020,7 +6024,7 @@ class TestLinalg(TestCase):
             lambdas1.append(worker.E[:])
 
         tol = 1e-8
-        # tol for scipy lobpcg will be choosed so that the number of
+        # tol for scipy lobpcg will be choosen so that the number of
         # iterations will be equal or very close to pytorch lobpcg
         # (that is around 170-180)
 
@@ -7667,7 +7671,106 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_linalg_matrix_exp_compare_with_taylor(self, device, dtype):
+
+        def normalize_to_1_operator_norm(sample, desired_norm):
+            sample_norm, _ = sample.abs().sum(-2).max(-1)
+            sample_to_1_norm = sample / sample_norm.unsqueeze(-1).unsqueeze(-1)
+            return sample_to_1_norm * desired_norm
+
+        def gen_good_cond_number_matrices(*n):
+            """
+            Generates a diagonally-domimant matrix
+            with the eigenvalues centered at 1
+            and the radii at most (n[-1] - 1) / (n[-2] ** 2)
+            """
+            identity = torch.eye(n[-2], n[-1], dtype=dtype, device=device).expand(*n)
+            x = torch.rand(*n, dtype=dtype, device=device) / (n[-1] ** 2)
+            x = (x - x * identity) + identity
+            return x
+
+        def get_taylor_approximation(a, deg):
+            a_ = a.cpu().numpy()
+            identity = torch.eye(a.size(-2), a.size(-1), dtype=dtype, device=device).expand_as(a)
+            res = identity.cpu().numpy()
+            taylor_term = identity.cpu().numpy()
+
+            for i in range(1, deg + 1):
+                taylor_term = np.matmul(a_, taylor_term) / i
+                res = res + taylor_term
+
+            return res
+
+        def scale_square(a, deg):
+            if a.abs().pow(2).sum().sqrt() < 1.0:
+                return get_taylor_approximation(a, 12)
+            else:
+                s = int(torch.log2(a.abs().pow(2).sum().sqrt()).ceil().item())
+                b = a / (2 ** s)
+                b = get_taylor_approximation(b, 18)
+                for _ in range(s):
+                    b = np.matmul(b, b)
+                return torch.from_numpy(b).to(a.device)
+
+        def run_test(*n):
+            degs = [1, 2, 4, 8, 12, 18]
+            if dtype == torch.float:
+                thetas = [
+                    1.192092800768788e-07,  # deg 1
+                    5.978858893805233e-04,  # deg 2
+                    5.116619363445086e-02,  # deg 4
+                    5.800524627688768e-01,  # deg 8
+                    1.461661507209034e+00,  # deg 12
+                    3.010066362817634e+00   # deg 18
+                ]
+            else:  # if torch.double
+                thetas = [
+                    2.220446049250313e-16,  # deg 1
+                    2.580956802971767e-08,  # deg 2
+                    3.397168839976962e-04,  # deg 4
+                    4.991228871115323e-02,  # deg 8
+                    2.996158913811580e-01,  # deg 12
+                    1.090863719290036e+00   # deg 18
+                ]
+
+            # generate norms to test different degree expansions
+            sample_norms = []
+            for i in range(len(thetas) - 1):
+                sample_norms.append(0.5 * (thetas[i] + thetas[i + 1]))
+            sample_norms = [thetas[0] / 2] + sample_norms + [thetas[-1] * 2]
+            degs = [degs[0]] + degs
+
+            for sample_norm, deg in zip(sample_norms, degs):
+                x = gen_good_cond_number_matrices(*n)
+                x = normalize_to_1_operator_norm(x, sample_norm)
+
+                mexp = torch.linalg.matrix_exp(x)
+                mexp_taylor = scale_square(x, deg)
+
+                self.assertEqual(mexp, mexp_taylor, atol=1e-2, rtol=0.0)
+
+        # single matrix
+        run_test(2, 2)
+        run_test(3, 3)
+        run_test(4, 4)
+        run_test(5, 5)
+
+        # small batch of matrices
+        run_test(3, 2, 2)
+        run_test(3, 3, 3)
+        run_test(3, 4, 4)
+        run_test(3, 5, 5)
+
+        # large batch of matrices
+        run_test(3, 3, 2, 2)
+        run_test(3, 3, 3, 3)
+        run_test(3, 3, 4, 4)
+        run_test(3, 3, 5, 5)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_matrix_exp_batch(self, device, dtype):
 
         def run_test(*n):
