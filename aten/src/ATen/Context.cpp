@@ -637,4 +637,19 @@ void Context::setAllowFP16ReductionCPU(bool b) {
   }
   allow_fp16_reduction_cpu = b;
 }
+#ifdef USE_ROCM
+// Add method to check if MX-FP4 is supported on current device
+bool Context::isFloat4Supported() const {
+#if defined(USE_ROCM) && ROCM_VERSION >= 60500
+    // Check for supported architectures
+    for (auto index: c10::irange(getNumGPUs())) {
+        const auto& prop = detail::getCUDAHooks().getDeviceProperties(index);
+        if (strstr(prop.gcnArchName, "gfx950") != nullptr) {
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+#endif
 } // namespace at
