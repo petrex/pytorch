@@ -609,7 +609,6 @@ class TestFP8MatmulCuda(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
-    @unittest.skipIf(torch.version.hip and 'gfx12' in torch.cuda.get_device_properties(0).gcnArchName, "Navi4 enablement in progress")
     @parametrize("use_fast_accum", [True, False])
     @unittest.skipIf(IS_NAVI4, "Navi4 enablement in progress")
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
