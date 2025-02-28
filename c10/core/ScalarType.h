@@ -156,6 +156,9 @@ enum class ScalarType : int8_t {
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ST_ENUM_VAL_)
 #undef DEFINE_ENUM_ST_ENUM_VAL_
       Undefined,
+  Float8_e5m2,
+  Float8_e4m3fn,
+  Float4_e2m1fn_x2,  // New MX-FP4 format
   NumOptions
 };
 
@@ -404,8 +407,8 @@ inline bool isComplexType(ScalarType t) {
 inline bool isQIntType(ScalarType t) {
   // Don't forget to extend this when adding new QInt types
   return t == ScalarType::QInt8 || t == ScalarType::QUInt8 ||
-      t == ScalarType::QInt32 || t == ScalarType::QUInt4x2 ||
-      t == ScalarType::QUInt2x4;
+      t == ScalarType::QInt32 || t == ScalarType::QUint4x2 ||
+      t == ScalarType::QUint2x4;
 }
 
 inline bool isBitsType(ScalarType t) {
@@ -425,7 +428,7 @@ inline bool isBarebonesUnsignedType(ScalarType t) {
 inline ScalarType toQIntType(ScalarType t) {
   switch (t) {
     case ScalarType::Byte:
-      return ScalarType::QUInt8;
+      return ScalarType::QUint8;
     case ScalarType::Char:
       return ScalarType::QInt8;
     case ScalarType::Int:
@@ -437,10 +440,10 @@ inline ScalarType toQIntType(ScalarType t) {
 
 inline ScalarType toUnderlying(ScalarType t) {
   switch (t) {
-    case ScalarType::QUInt8:
-    case ScalarType::QUInt4x2:
+    case ScalarType::QUint8:
+    case ScalarType::QUint4x2:
       [[fallthrough]];
-    case ScalarType::QUInt2x4:
+    case ScalarType::QUint2x4:
       return ScalarType::Byte;
     case ScalarType::QInt8:
       return ScalarType::Char;
@@ -463,10 +466,10 @@ inline bool isSignedType(ScalarType t) {
   // below?
   switch (t) {
     case ScalarType::QInt8:
-    case ScalarType::QUInt8:
+    case ScalarType::QUint8:
     case ScalarType::QInt32:
-    case ScalarType::QUInt4x2:
-    case ScalarType::QUInt2x4:
+    case ScalarType::QUint4x2:
+    case ScalarType::QUint2x4:
       TORCH_CHECK(false, "isSignedType not supported for quantized types");
     case ScalarType::Bits1x8:
     case ScalarType::Bits2x4:
@@ -605,5 +608,13 @@ C10_API std::pair<std::string, std::string> getDtypeNames(
 
 // Returns a map of string name to dtype.
 C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap();
+
+template<>
+struct CppTypeToScalarType<float4_e2m1fn_x2> : std::integral_constant<ScalarType, ScalarType::Float4_e2m1fn_x2> {};
+
+template<>
+struct ScalarTypeToCppType<ScalarType::Float4_e2m1fn_x2> {
+  using type = float4_e2m1fn_x2;
+};
 
 } // namespace c10
