@@ -84,6 +84,10 @@ inline cudaDataType ScalarTypeToCudaDataType(const c10::ScalarType& scalar_type)
     case c10::ScalarType::Float8_e5m2:
       return CUDA_R_8F_E5M2;
 #endif
+#if defined(USE_ROCM) && ROCM_VERSION >= 60500
+    case c10::ScalarType::Float4_e2m1fn_x2:
+      return HIP_R_4F_E2M1_X2;
+#endif
 #if defined(USE_ROCM)
     case c10::ScalarType::Float8_e4m3fnuz:
       return HIP_R_8F_E4M3_FNUZ;
